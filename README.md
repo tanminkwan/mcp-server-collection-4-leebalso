@@ -1,6 +1,6 @@
 # MCP Server Collection
 
-**Email 발송, 에러 로그 추출, 오류/조치 RAG 검색·등록 기능을 제공하는 독립적인 MCP(Model Context Protocol) 서버 모음**
+**Email 발송, 에러 로그 추출, 오류/조치 RAG 검색·등록, 설정 변경 이력 조회 기능을 제공하는 독립적인 MCP(Model Context Protocol) 서버 모음**
 
 각 서버는 완전히 독립된 패키지(`config`/`client`/`server` 3계층)로 구성되며, stdio 전송 방식으로 동작해
 VS Code의 Claude 확장 등 MCP 클라이언트에서 도구로 사용할 수 있습니다.
@@ -12,6 +12,7 @@ VS Code의 Claude 확장 등 MCP 클라이언트에서 도구로 사용할 수 �
 | Email MCP | `email_mcp` | `email-mcp` | EmailApi를 통해 HTML/Markdown 이메일 발송 | 본 문서 |
 | Extract Error Log MCP | `extract_error_log_mcp` | `extract-error-log-mcp` | 서버 에러 로그 추출 요청 및 결과 조회 | [설계서](docs/extract_error_log_mcp_design.md) |
 | Error RAG MCP | `error_rag_mcp` | `error-rag-mcp` | 오류/조치 사례를 RAG 서비스(llm-agent)에서 검색·등록 | [요구사항 정의서](docs/error_rag_mcp_requirements.md) |
+| Config Diff MCP | `config_diff_mcp` | `config-diff-mcp` | WAS(`domain.xml`)/WEB(`http.m`) 설정 변경 이력 조회 | [요구사항 정의서](docs/config_diff_mcp_requirements.md) |
 
 ## 주요 기능
 
@@ -23,6 +24,8 @@ VS Code의 Claude 확장 등 MCP 클라이언트에서 도구로 사용할 수 �
 | Extract Error Log MCP | `get_extracted_log` | command_id로 추출된 로그(마크다운) 조회 |
 | Error RAG MCP | `search_similar_error` | 오류 요약(벡터 검색)+키워드(텍스트 매칭)로 과거 유사 오류/조치 사례 검색 |
 | Error RAG MCP | `register_error_resolution` | 오류 및 조치 결과를 표준 보고서 형식으로 RAG에 등록 |
+| Config Diff MCP | `get_diff_web` | WEB 설정(`http.m`) 변경 내역 조회 |
+| Config Diff MCP | `get_diff_was` | WAS 설정(`domain.xml`) 변경 내역 조회 |
 
 ## 빠른 시작
 
@@ -42,19 +45,21 @@ cp .env.example .env
 email-mcp
 extract-error-log-mcp
 error-rag-mcp
+config-diff-mcp
 ```
 
 ## 환경변수
 
-### Email MCP / Extract Error Log MCP (공유)
+### Email MCP / Extract Error Log MCP / Config Diff MCP (공유)
 
 | 변수 | 설명 | 필수 | 기본값 |
 |------|------|:----:|--------|
-| `API_BASE_URL` | EmailApi/로그 추출 API 서버 주소 | O | — |
+| `API_BASE_URL` | EmailApi/로그 추출/변경 이력 API 서버 주소 | O | — |
 | `API_BEARER_TOKEN` | JWT 인증 토큰 | O | — |
 | `API_SSL_VERIFY` | SSL 인증서 검증 여부 | X | `false` |
 | `API_TIMEOUT` | HTTP 요청 타임아웃(초) | X | `60` |
 | `EMAIL_RECIPIENT_MAPPING` | 수신자 이름-이메일 매핑 (JSON 또는 `이름:이메일` 콤마 구분, Email MCP 전용) | X | — |
+| `DIFF_DATE_PADDING_DAYS` | 단일 일자 지정 시 앞뒤로 확장할 일수 (Config Diff MCP 전용) | X | `1` |
 
 > **수신자 이름 매핑 (`EMAIL_RECIPIENT_MAPPING`)**:
 > - `EMAIL_RECIPIENT_MAPPING` 환경변수에 이름과 이메일 주소를 등록하면, 이메일 발송 시 `receivers`에 이메일 주소 대신 이름만 지정해도 서버가 자동으로 이메일 주소로 변환합니다.
@@ -101,6 +106,10 @@ llm-agent RAG API 연동을 위한 별도 환경변수를 사용합니다 (위 �
     "error-rag-mcp": {
       "type": "stdio",
       "command": "${workspaceFolder}/.venv/bin/error-rag-mcp"
+    },
+    "config-diff-mcp": {
+      "type": "stdio",
+      "command": "${workspaceFolder}/.venv/bin/config-diff-mcp"
     }
   }
 }
@@ -121,6 +130,10 @@ llm-agent RAG API 연동을 위한 별도 환경변수를 사용합니다 (위 �
     "error-rag-mcp": {
       "type": "stdio",
       "command": "C:\\projects\\mcp-server\\.venv\\Scripts\\error-rag-mcp.exe"
+    },
+    "config-diff-mcp": {
+      "type": "stdio",
+      "command": "C:\\projects\\mcp-server\\.venv\\Scripts\\config-diff-mcp.exe"
     }
   }
 }
@@ -229,6 +242,79 @@ Markdown 본문을 HTML로 자동 변환하여 발송합니다. 헤더, 목록, 
 > `was_instance_id`는 결합되어 "오류 발생 위치" 한 항목이 됩니다). 자세한 설계 근거는
 > [요구사항 정의서](docs/error_rag_mcp_requirements.md)를 참조하세요.
 
+### Config Diff MCP
+
+#### get_diff_web
+
+WEB 서버 설정 파일(`http.m`)의 변경 내역을 조회합니다. 사용자가 `web` 대신 `http.m`이라고
+지칭해도 이 도구를 사용합니다.
+
+| 파라미터 | 타입 | 필수 | 설명 |
+|----------|------|:----:|------|
+| `host_id` | string | O | WEB 호스트 ID ('서버'/'시스템'이라고도 부름, 예: `paaaa11`). 모르면 사용자에게 되물어야 합니다 |
+| `start_date` | string | X | 조회 시작일 `YYYY-MM-DD` |
+| `end_date` | string | X | 조회 종료일 `YYYY-MM-DD` |
+
+#### get_diff_was
+
+WAS 도메인 설정 파일(`domain.xml`)의 변경 내역을 조회합니다. 사용자가 `was` 대신 `domain.xml`
+이라고 지칭해도 이 도구를 사용합니다.
+
+| 파라미터 | 타입 | 필수 | 설명 |
+|----------|------|:----:|------|
+| `domain_id` | string | O | WAS 도메인 ID (예: `PAAA_Domain`). **서버명(`host_id`)으로는 조회할 수 없습니다** |
+| `start_date` | string | X | 조회 시작일 `YYYY-MM-DD` |
+| `end_date` | string | X | 조회 종료일 `YYYY-MM-DD` |
+
+**동작 규칙**
+
+- 날짜를 지정하지 않으면 가장 최근 변경 1건을 반환합니다("최근 변경 내역" 요청).
+- 하루만 지목하면(`start_date`만, 또는 `start_date == end_date`) 앞뒤로 `DIFF_DATE_PADDING_DAYS`
+  (기본 1일)만큼 여유를 두고 조회합니다. 서로 다른 두 날짜를 주면 그 구간을 그대로 사용합니다.
+- 변경 내역이 0건이면 `존재하지 않습니다.`, 2건 이상이면 최신 1건만 반환하고 `notice`에 전체
+  건수와 변경 일시를 안내합니다.
+- 응답에 이전 설정 전문(`old`)은 포함되지 않습니다 — `new`와 `unified_diff`로 복원할 수 있어
+  AI Agent의 컨텍스트 토큰을 아끼기 위함입니다. (실측: `new` 280,413자 / `old` 274,575자 /
+  `unified_diff` 672자 — 실제 변경분은 672자인데 `old`까지 보내면 응답이 두 배가 됩니다)
+- `host_id`/`domain_id`가 비어 있으면 API를 호출하지 않고, 사용자에게 되묻도록 유도하는 메시지를
+  반환합니다.
+
+**자연어 사용 예시** (Claude 채팅)
+
+```
+최근 paaaa11 서버에 web 변경 내역 알려줘
+8월 11일 was domain PAAA_Domain 설정 변경 내역 알려줘
+paaaa11 http.m 최근에 바뀐 거 있어?
+PICI_Domain domain.xml 변경 이력 보여줘
+```
+
+**응답 예시 — 변경 내역이 있을 때**
+
+```json
+{
+  "found": true,
+  "total_count": 2,
+  "notice": "전체 2건의 변경 내역이 있습니다. 그 중 가장 최근(2026-02-23 14:40:00) 1건만 반환합니다.",
+  "diff": {
+    "id": 7,
+    "create_on": "2026-02-23 14:40:00",
+    "domain_id": "PICI_Domain",
+    "new": "...현재 domain.xml 전문...",
+    "unified_diff": "--- previous\n+++ current\n@@ -2149,7 +2149,7 @@\n ..."
+  }
+}
+```
+
+변경 내역이 1건이면 `notice`는 `null`입니다.
+
+**응답 예시 — 변경 내역이 없을 때**
+
+```json
+{ "found": false, "total_count": 0, "message": "존재하지 않습니다." }
+```
+
+> 자세한 설계 근거는 [요구사항 정의서](docs/config_diff_mcp_requirements.md)를 참조하세요.
+
 ## 프로젝트 구조
 
 ```
@@ -241,10 +327,14 @@ src/
 │   ├── config.py
 │   ├── client.py
 │   └── server.py
-└── error_rag_mcp/
-    ├── config.py     ← Settings, 도메인 상수(MAX_ERROR_SUMMARY_LENGTH 등)
-    ├── client.py     ← llm-agent RAG API 클라이언트 (RagClient)
-    └── server.py     ← search_similar_error / register_error_resolution 등록
+├── error_rag_mcp/
+│   ├── config.py     ← Settings, 도메인 상수(MAX_ERROR_SUMMARY_LENGTH 등)
+│   ├── client.py     ← llm-agent RAG API 클라이언트 (RagClient)
+│   └── server.py     ← search_similar_error / register_error_resolution 등록
+└── config_diff_mcp/
+    ├── config.py     ← Settings, ResourceSpec(WAS/WEB), 경로·형식·메시지 상수
+    ├── client.py     ← 변경 이력 API 클라이언트 (DiffClient)
+    └── server.py     ← get_diff_was / get_diff_web 등록
 ```
 
 ## 테스트

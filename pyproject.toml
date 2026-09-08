@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mcp-server-collection"
 version = "0.2.0"
-description = "Collection of MCP servers: Email, Extract Error Log, and Error RAG"
+description = "Collection of MCP servers: Email, Extract Error Log, Error RAG, and Config Diff"
 requires-python = ">=3.11"
 dependencies = [
     "mcp>=1.0.0",
@@ -25,6 +25,7 @@ dev = [
 email-mcp = "email_mcp.server:main"
 extract-error-log-mcp = "extract_error_log_mcp.server:main"
 error-rag-mcp = "error_rag_mcp.server:main"
+config-diff-mcp = "config_diff_mcp.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -32,7 +33,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "--cov=email_mcp --cov=error_rag_mcp --cov-report=term-missing --cov-fail-under=85"
+addopts = "--cov=email_mcp --cov=error_rag_mcp --cov=config_diff_mcp --cov-report=term-missing --cov-fail-under=85"
 
 [tool.coverage.run]
-source = ["src/email_mcp", "src/error_rag_mcp"]
+source = ["src/email_mcp", "src/error_rag_mcp", "src/config_diff_mcp"]

@@ -1,12 +1,26 @@
 # Config Diff MCP 요구사항 정의서 겸 설계서 (`config_diff_mcp`)
 
-> 상태: **설계 완료 / 구현 대기**. 대상 API 스펙은 실제 서버
+> 상태: **구현 완료 · 실서버 검증 완료**. 대상 API 스펙은 실제 서버
 > (`https://app.mwm.local:20443`)의 OpenAPI 문서(`GET /api/v1/_openapi`)를 직접 조회해
 > `MwDiffDataApi` 태그의 4개 오퍼레이션 정의를 확보한 상태다 (2026-09-08).
 >
-> ⚠️ **선결 과제 있음**: `/diff_data/*` 4개 경로는 현재 Bearer 토큰으로 접근되지 않고
-> 로그인 페이지로 302 리다이렉트된다. 상세와 해결 방안은 [10. Open Issues](#10-open-issues) 참조.
-> 이 항목이 해소되어야 구현·검증이 가능하다.
+> ✅ **인증 이슈 해소** (2026-09-08): 최초 조사 시 `/diff_data/*` 4개 경로가 Bearer 토큰으로
+> 접근되지 않고 로그인 페이지로 302 리다이렉트되었으나, 서버 측 조치 후 동일 토큰으로 200
+> (`application/json`)이 반환되는 것을 확인했다. 코드 변경 없이 1안(JWT 인증) 전제 구현이
+> 그대로 동작한다. 경위는 [10. Open Issues](#10-open-issues) #1 참조.
+>
+> **구현 완료** (2026-09-08): `src/config_diff_mcp/`(`config.py`/`client.py`/`server.py`) 및
+> `tests/config_diff_mcp/`(`test_config.py`/`test_client.py`/`test_server.py`)를 본 문서의
+> 3~9절대로 TDD로 구현했다. `pytest` 전체 119개(신규 54개 포함) 모두 통과, `config_diff_mcp`
+> 라인 커버리지 99%(요구사항 85% 이상 충족). `pyproject.toml`에 `config-diff-mcp` 엔트리포인트와
+> 커버리지 대상을 추가했고, `.env.example`에 `DIFF_DATE_PADDING_DAYS`를 추가했다. 도구 스키마
+> 상 `host_id`/`domain_id`가 `required`로 노출되는 것을 실제 `list_tools()` 호출로 확인했다.
+>
+> **실서버 검증 완료** (2026-09-08): 실제 리발소 서버(`app.mwm.local:20443`)를 대상으로 두 도구를
+> end-to-end 실행해 0건/1건/2건 분기, 날짜 확장, `old` 제거, 식별자 되묻기를 모두 확인했다.
+> 이 과정에서 **목록 API가 OpenAPI 스펙과 달리 `{"data": [...]}` 봉투로 응답**하는 것을 발견해
+> 5.1절과 구현을 수정했다(두 형태 모두 허용). `create_on` 실제 포맷도 확정했다(#3). 최종
+> `pytest` 120개 통과, `config_diff_mcp` 커버리지 99%.
 >
 > 기존 `email_mcp`, `extract_error_log_mcp`, `error_rag_mcp`와 동일한 스타일(아키텍처, 의존성,
 > 환경설정 패턴)로 구성된 독립적인 4번째 MCP 서버로 추가한다.
@@ -232,16 +246,23 @@
 > API는 `host_id`/`domain_id` 없이도 호출되지만(전체 대상 조회), **MCP 도구 레벨에서는 필수로
 > 강제**한다. 근거는 3.5절 참조.
 
-**Response 200** — JSON 배열
+**Response 200** — `data` 키로 감싼 JSON 배열
+
+> ⚠️ **스펙과 실제 응답이 다르다.** OpenAPI 스펙은 최상위가 배열(`type: array`)이라고 선언하지만,
+> 실제 서버는 **`{"data": [...]}` 봉투**로 응답한다 (2026-09-08 실측). 구현은 두 형태를 모두
+> 허용한다 — dict면 `data` 키를 꺼내고, 배열이면 그대로 사용한다
+> (`LIST_RESPONSE_DATA_KEY = "data"` 상수).
 
 ```jsonc
-// web
-[ { "id": 123, "host_id": "paaaa11", "port": 8080, "create_on": "2026-08-11 14:23:01" } ]
-// was
-[ { "id": 456, "domain_id": "PAAA_Domain", "create_on": "2026-08-11 14:23:01" } ]
+// web (실측)
+{ "data": [ { "id": 123, "host_id": "paaaa11", "port": 8080, "create_on": "2026-08-11 14:23:01" } ] }
+// was (실측)
+{ "data": [ { "id": 7, "domain_id": "PICI_Domain", "create_on": "2026-02-23 14:40:00" } ] }
 ```
 
-- 값이 `null`이거나 배열이 아닌 응답이 오는 경우도 **0건과 동일하게** 취급한다(방어적 처리).
+- 조회 결과가 없으면 `{"data": []}`가 반환된다(HTTP 200). 존재하지 않는 `host_id`/`domain_id`를
+  넘겨도 오류가 아니라 빈 배열이다 — 실측 확인.
+- 값이 `null`이거나 `data` 키가 없거나 배열이 아닌 응답도 **0건과 동일하게** 취급한다(방어적 처리).
 - **정렬은 서버(본 MCP)가 직접 수행한다.** 목록 API의 정렬 순서는 스펙에 명시되어 있지 않으므로
   응답 순서를 신뢰하지 않는다. `create_on` 내림차순으로 정렬해 첫 번째를 "가장 최근"으로 삼고,
   `create_on` 파싱이 불가능하거나 동률이면 `id` 내림차순을 2차 기준으로 사용한다.
@@ -263,14 +284,20 @@
 | `unified_diff` | ✅ | ✅ | Unified Diff 결과 | 포함 |
 | `old` | ✅ | ✅ | 이전 설정 텍스트 | **제거 (5.3절)** |
 
+상세 응답은 목록과 달리 **봉투 없이 최상위에 필드가 놓인다**(실측 확인). `id`는 포함되지 않으므로
+목록에서 얻은 값을 서버가 주입한다(6.3절).
+
 **Response 404**: 해당 ID의 이력을 찾을 수 없음 → 목록에는 있으나 상세가 없는 비정상 상태이므로,
-"해당 변경 이력 상세를 찾을 수 없습니다" 오류 메시지로 변환해 반환한다.
+"해당 변경 이력 상세를 찾을 수 없습니다" 오류 메시지로 변환해 반환한다. (존재하지 않는 id로
+실제 404가 반환되는 것을 확인함)
 
 ### 5.3 `old` 필드 제거 (필수 요구사항)
 상세 응답의 `old`(이전 설정 전문)는 **반환하지 않는다.**
 
 - **근거**: `old`는 `new`와 `unified_diff`를 역으로 적용하면 복원 가능한 파생 정보다.
   설정 파일 전문은 수천 라인에 달할 수 있어, 중복 전송 시 AI Agent의 컨텍스트 토큰을 크게 낭비한다.
+  **실측**(WAS `id=7`): `new` 280,413자 / `old` 274,575자 / `unified_diff` 672자 —
+  실제 변경분은 672자인데 `old`를 함께 보내면 응답 크기가 두 배가 된다.
 - **구현 위치**: 클라이언트가 아니라 **도구 함수(server.py) 쪽에서 제거**한다. `DiffClient`는
   API 응답을 가공 없이 그대로 반환하는 단일 책임만 갖는다 (SRP).
 - 제거 대상 필드명은 `config.py`의 `EXCLUDED_DETAIL_FIELDS = ("old",)` 상수로 관리한다
@@ -379,6 +406,7 @@ AI Agent가 파싱하기 쉽도록 **항상 동일한 구조의 JSON 문자열**
 | `WEB_CONFIG_FILE_NAME` | `http.m` | WEB 설정 파일명 — 도구 설명/별칭 (3.4절) |
 | `DATE_FORMAT` | `%Y-%m-%d` | 날짜 입출력 형식 |
 | `DEFAULT_DATE_PADDING_DAYS` | `1` | 여유일수 기본값 |
+| `LIST_RESPONSE_DATA_KEY` | `data` | 목록 응답 봉투 키 (5.1절) |
 | `EXCLUDED_DETAIL_FIELDS` | `("old",)` | 상세 응답 제외 필드 |
 | `NOT_FOUND_MESSAGE` | `존재하지 않습니다.` | 0건 메시지 |
 | `MISSING_HOST_ID_MESSAGE` | (3.5절) | `host_id` 누락 시 되묻기 유도 메시지 |
@@ -452,8 +480,8 @@ tests/config_diff_mcp/
 
 ## 10. Open Issues
 
-### #1 (필수 선결) `/diff_data/*`가 Bearer 토큰으로 접근되지 않음
-**현상** (2026-09-08 실측):
+### #1 (해소됨) `/diff_data/*`가 Bearer 토큰으로 접근되지 않던 문제
+**최초 현상** (2026-09-08 오전 실측):
 
 | 요청 | 결과 |
 |------|------|
@@ -467,7 +495,11 @@ tests/config_diff_mcp/
 **세션 로그인(Flask-AppBuilder `@has_access`)으로 보호되는 루트 경로**에 등록되어 있다.
 OpenAPI 문서에는 `security: [{ jwt: [] }]`로 선언되어 있으나 실제 동작과 불일치한다.
 
-**해결 방안 (선호 순)**:
+**해소** (2026-09-08 오후 실측): 서버 측 조치 후 동일 토큰으로 `/diff_data/web/list`,
+`/diff_data/was/list` 모두 **200 (`application/json`)** 이 반환된다. 아래 1안에 해당하는
+상태가 되었으며, MCP 서버 코드는 변경 없이 그대로 동작한다.
+
+**당시 검토했던 해결 방안 (기록용, 선호 순)**:
 1. **(권장) 서버 측 수정** — `/diff_data/*`를 `/api/v1` 아래 JWT 인증 API로 노출하거나
    `@has_access` → `@has_access_api`(또는 `protect()`)로 교체한다. 기존 3개 MCP 서버와 동일한
    인증 방식을 유지할 수 있어 `config.py`/`client.py`가 단순해진다.
@@ -477,8 +509,7 @@ OpenAPI 문서에는 `security: [{ jwt: [] }]`로 선언되어 있으나 실제 
 3. **`/api/v1/security/login`으로 JWT 재발급** — 다만 세션 보호 경로는 JWT를 보지 않으므로
    이 방법만으로는 해결되지 않을 가능성이 높다. 1번과 병행 검토.
 
-**결정 필요**: 위 3안 중 어느 방향으로 갈지 확정되어야 `config.py`/`client.py`의 인증 설계가
-확정된다. 본 문서의 7절은 **1안(JWT)** 을 전제로 작성되어 있다.
+**결과**: 1안으로 해소되어 7절(JWT 전제)의 설계가 그대로 유효하다. 추가 인증 로직은 불필요하다.
 
 ### #2 WAS 조회 시 `host_id → domain_id` 매핑
 사용자가 WAS에 대해 서버명만 말하는 경우(`"paaaa11 서버 WAS 설정 변경 내역"`) `/diff_data/was/list`는
@@ -490,19 +521,29 @@ OpenAPI 문서에는 `security: [{ jwt: [] }]`로 선언되어 있으나 실제 
 - **대안(범위 밖)**: 호스트→도메인 매핑 API가 별도로 존재한다면 이를 조회하는 단계를 추가할 수
   있다. 해당 API 존재 여부 확인 필요.
 
-### #3 `create_on` 문자열 형식 미확정
-OpenAPI 스펙상 `create_on`은 `type: string`으로만 정의되어 있고 실제 포맷(`YYYY-MM-DD HH:MM:SS`
-vs ISO-8601)은 #1 때문에 실제 응답으로 확인하지 못했다.
+### #3 (해소됨) `create_on` 문자열 형식
+OpenAPI 스펙상 `create_on`은 `type: string`으로만 정의되어 있었으나, 실측 결과
+**`"2026-02-23 14:40:00"`(`%Y-%m-%d %H:%M:%S`)** 형식임을 확인했다 (2026-09-08).
 
-- **대응**: 정렬 시 여러 포맷을 시도하고, 전부 실패하면 **문자열 비교로 fallback**한 뒤
-  최종적으로 `id` 내림차순을 사용한다. 파싱 실패가 예외로 이어지지 않게 한다.
-- #1 해소 후 실제 응답으로 포맷을 확인하고 본 절과 구현을 갱신한다.
+- 이 형식은 `CREATE_ON_FORMATS`의 첫 번째 후보와 일치하므로 정렬이 정상 동작한다.
+- 다중 포맷 시도 → 문자열 비교 → `id` 내림차순 fallback 로직은 그대로 유지한다. 포맷이 바뀌어도
+  예외 없이 동작해야 하기 때문이며, 해당 경로도 테스트로 커버되어 있다.
 
 ### #4 목록 조회 결과의 최대 건수
 `/diff_data/*/list`에 `limit`/페이징 파라미터가 없어, 넓은 날짜 구간을 지정하면 매우 많은 레코드가
 반환될 수 있다. 본 서버는 목록의 `id`/`create_on`만 사용하고 상세는 1건만 조회하므로 AI Agent 쪽
-토큰 낭비는 없으나, 서버 응답 지연 가능성은 있다. #1 해소 후 실측하여 필요 시 날짜 구간 상한
+토큰 낭비는 없으나, 서버 응답 지연 가능성은 있다. 현재 데이터 규모에서는(WAS 전체 2건)
+문제가 관측되지 않았다. 데이터가 누적된 뒤 재측정하여 필요 시 날짜 구간 상한
 (예: `MAX_DATE_RANGE_DAYS`) 도입을 검토한다.
+
+### #5 목록 응답 봉투(`{"data": [...]}`)와 스펙 불일치
+OpenAPI 스펙은 목록 응답 최상위를 배열로 선언하지만 실제 서버는 `{"data": [...]}` 봉투로
+응답한다 (2026-09-08 실측, 5.1절).
+
+- **대응**: 구현은 두 형태를 모두 허용한다(dict면 `data` 키 추출, 배열이면 그대로). 서버가 스펙에
+  맞춰 배열로 바뀌더라도 코드 수정이 필요 없다.
+- **후속(서버 측)**: OpenAPI 스펙의 `responses.200.content.schema`를 실제 응답에 맞게
+  `{"data": [...]}` 로 수정하는 것이 바람직하다. 다른 소비자가 스펙만 보고 구현하면 깨진다.
 
 ---
 
@@ -519,15 +560,15 @@ vs ISO-8601)은 #1 때문에 실제 응답으로 확인하지 못했다.
 
 ## 12. 구현 체크리스트
 
-- [ ] Open Issue #1 인증 방식 확정 (**선결**)
-- [ ] `tests/config_diff_mcp/test_config.py` 작성 → `src/config_diff_mcp/config.py` 구현
-- [ ] `tests/config_diff_mcp/test_client.py` 작성 → `src/config_diff_mcp/client.py` 구현
-- [ ] `tests/config_diff_mcp/test_server.py` 작성 → `src/config_diff_mcp/server.py` 구현
+- [x] Open Issue #1 인증 방식 확정 (**해소** — 서버 측 조치로 JWT 접근 가능)
+- [x] `tests/config_diff_mcp/test_config.py` 작성 → `src/config_diff_mcp/config.py` 구현
+- [x] `tests/config_diff_mcp/test_client.py` 작성 → `src/config_diff_mcp/client.py` 구현
+- [x] `tests/config_diff_mcp/test_server.py` 작성 → `src/config_diff_mcp/server.py` 구현
       (도구 설명에 `domain.xml` / `http.m` 별칭이 포함되는지 검증 — 3.4절,
        `host_id`/`domain_id` 누락·공백 시 API 호출 없이 되묻기 메시지 반환 검증 — 3.5절)
-- [ ] `pyproject.toml` 엔트리포인트·커버리지 대상 추가
-- [ ] `.env.example`에 `DIFF_DATE_PADDING_DAYS` 추가
-- [ ] 실제 서버 대상 end-to-end 검증 (`create_on` 포맷 확인 → #3 갱신)
-- [ ] `architecture.md` / `usage.md` / `installation-guide.md` / `windows-deployment-guide.md` /
+- [x] `pyproject.toml` 엔트리포인트·커버리지 대상 추가
+- [x] `.env.example`에 `DIFF_DATE_PADDING_DAYS` 추가
+- [x] 실제 서버 대상 end-to-end 검증 (`create_on` 포맷 확정 → #3 해소, 목록 봉투 발견 → #5 추가)
+- [x] `architecture.md` / `usage.md` / `installation-guide.md` / `windows-deployment-guide.md` /
       `README.md` 갱신
-- [ ] 전체 테스트 통과 및 커버리지 85% 이상 확인
+- [x] 전체 테스트 통과 및 커버리지 85% 이상 확인 (120 passed, config_diff_mcp 99%)

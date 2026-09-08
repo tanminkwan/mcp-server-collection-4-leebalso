@@ -69,6 +69,7 @@ pip install mcp_server_collection-0.1.0-py3-none-any.whl --no-index --find-links
 .venv\Scripts\email-mcp.exe
 .venv\Scripts\extract-error-log-mcp.exe
 .venv\Scripts\error-rag-mcp.exe
+.venv\Scripts\config-diff-mcp.exe
 ```
 실행했을 때 `ModuleNotFoundError` 같은 에러 없이 무한 대기 상태로 진입한다면 완벽하게 설치된 것입니다.
 
@@ -80,7 +81,7 @@ pip install mcp_server_collection-0.1.0-py3-none-any.whl --no-index --find-links
 실행 디렉토리(`C:\mcp-server`)에 `.env` 파일을 만들고 아래와 같이 설정합니다.
 
 ```env
-# email-mcp / extract-error-log-mcp 공유 설정
+# email-mcp / extract-error-log-mcp / config-diff-mcp 공유 설정
 API_BASE_URL=https://app.mwm.local:20443
 API_BEARER_TOKEN=발급받은_JWT_토큰_입력
 API_SSL_VERIFY=false
@@ -94,12 +95,17 @@ RAG_API_BEARER_TOKEN=
 RAG_API_SSL_VERIFY=false
 RAG_COLLECTION_NAME=여기에_실제_콜렉션_ID_입력
 RAG_DOMAIN_ID=여기에_실제_도메인_ID_입력
+
+# config-diff-mcp 전용 설정 (접속 정보는 위 API_* 를 공유)
+# 선택: 단일 일자만 지정됐을 때 앞뒤로 확장할 일수 (기본 1일)
+DIFF_DATE_PADDING_DAYS=1
 ```
 
 *참고: `EMAIL_RECIPIENT_MAPPING`을 설정하면 이메일 주소 대신 `홍길동` 같은 수신자 이름만 전달해도 자동으로 이메일 주소로 변환하여 발송합니다.*
 
 이제 VS Code의 `mcp.json`이나 클라이언트 설정 파일에서 `command` 경로를 서버별로 지정하여 사용하시면 됩니다
-(예: `C:\mcp-server\.venv\Scripts\email-mcp.exe`, `C:\mcp-server\.venv\Scripts\error-rag-mcp.exe`)!
+(예: `C:\mcp-server\.venv\Scripts\email-mcp.exe`, `C:\mcp-server\.venv\Scripts\error-rag-mcp.exe`,
+`C:\mcp-server\.venv\Scripts\config-diff-mcp.exe`)!
 
 
 ---

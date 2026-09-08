@@ -2,7 +2,7 @@
 
 ## 개요
 
-이 저장소는 **stdio 전송 방식**의 독립적인 MCP(Model Context Protocol) 서버 3개로 구성된
+이 저장소는 **stdio 전송 방식**의 독립적인 MCP(Model Context Protocol) 서버 4개로 구성된
 컬렉션이다. 각 서버는 서로 의존하지 않으며, 모두 `config.py`(환경변수 기반 설정) →
 `client.py`(HTTP 클라이언트) → `server.py`(MCP 도구 등록 및 엔트리포인트) 3계층 구조를
 공유한다.
@@ -12,6 +12,7 @@
 | Email MCP | `email_mcp` | 리발소 EmailApi를 통해 HTML/Markdown 이메일 발송 |
 | Extract Error Log MCP | `extract_error_log_mcp` | 서버 에러 로그 추출 요청 및 결과(마크다운) 조회 |
 | Error RAG MCP | `error_rag_mcp` | llm-agent RAG API로 오류/조치 사례 검색·등록 |
+| Config Diff MCP | `config_diff_mcp` | 리발소 MwDiffDataApi로 WAS(`domain.xml`)/WEB(`http.m`) 설정 변경 이력 조회 |
 
 공통 의존성 흐름:
 
@@ -177,3 +178,87 @@ server.py → client.py → config.py
 - **하드코딩 금지**: API 경로, 검색 결과 개수 기본값, 300자 제한, 키워드 최대 개수, content
   결합 템플릿, 보고서 양식 모두 `config.py` 상수/환경변수로 관리한다.
 - 상세 요구사항과 llm-agent 실제 API 검증 결과는 [error_rag_mcp 요구사항 정의서](error_rag_mcp_requirements.md) 참조.
+
+---
+
+## 4. Config Diff MCP (`config_diff_mcp`)
+
+미들웨어 설정 파일의 **변경 이력(configuration diff)** 을 조회한다. 장애 분석 시 "언제 무엇이
+바뀌었는가"가 1차 원인 후보이므로 `extract_error_log_mcp`/`error_rag_mcp`와 함께 쓰이는 것을
+전제로 한다. 리발소 서비스의 `MwDiffDataApi`(`/diff_data/{was|web}/list`,
+`/diff_data/{was|web}/{id}`)와 통신하며, 접속 설정은 `email_mcp`/`extract_error_log_mcp`와
+동일한 `API_*` 환경변수를 공유한다.
+
+### 모듈 구조
+
+```
+src/config_diff_mcp/
+├── __init__.py
+├── config.py        # Settings, ResourceSpec(WAS_RESOURCE/WEB_RESOURCE), 경로·형식·메시지 상수
+├── client.py        # DiffClient — list_diffs() / get_diff_detail() (httpx 기반)
+└── server.py        # get_diff_was / get_diff_web 도구 등록, main
+                     # + 날짜 정규화·건수 분기·최신순 정렬·old 제거·응답 조립 로직
+```
+
+### 모듈 설명
+
+#### config.py — 설정 관리
+- 필수 환경변수: `API_BASE_URL`, `API_BEARER_TOKEN` (다른 두 리발소 연동 서버와 공유)
+- 선택 환경변수: `API_SSL_VERIFY`, `API_TIMEOUT`, `DIFF_DATE_PADDING_DAYS`(기본 1)
+- `ResourceSpec`(frozen dataclass): 조회 대상 한 종류의 정의를 묶는다 — `list_path`,
+  `detail_path`, `filter_key`(`domain_id`/`host_id`), `config_file_name`(`domain.xml`/`http.m`),
+  `missing_filter_message`. `WAS_RESOURCE`/`WEB_RESOURCE` 두 인스턴스를 제공한다.
+- 도메인 상수: `DATE_FORMAT`, `CREATE_ON_FORMATS`, `DEFAULT_DATE_PADDING_DAYS`,
+  `EXCLUDED_DETAIL_FIELDS=("old",)`, `NOT_FOUND_MESSAGE`, `MULTIPLE_RESULT_NOTICE_TEMPLATE`,
+  `MISSING_HOST_ID_MESSAGE`, `MISSING_DOMAIN_ID_MESSAGE`
+
+#### client.py — DiffClient
+- 목록/상세 각각 단일 HTTP GET만 책임진다(SRP). 응답을 가공하지 않는다.
+- `list_diffs(resource, params)`: `GET /diff_data/{was|web}/list` — 실제 응답은 `{"data": [...]}`
+  봉투 형태이며(OpenAPI 스펙은 배열로 선언), 봉투 해제는 `server.py`의 `_extract_records()`가
+  담당한다(두 형태 모두 허용).
+- `get_diff_detail(resource, record_id)`: `GET /diff_data/{was|web}/{id}`
+- 두 메서드 모두 `ResourceSpec`을 받으므로 대상이 늘어나도 클라이언트 코드는 그대로다.
+
+#### server.py — MCP 서버
+- `_get_diff()` 하나가 WAS/WEB 공통 흐름을 담당하고, 두 도구는 `ResourceSpec`과 필터값만
+  달리해 위임한다.
+- **식별자 검증**: `host_id`/`domain_id`가 없거나 공백이면 API를 호출하지 않고
+  `missing_filter_message`를 반환해 AI Agent가 사용자에게 되묻도록 유도한다.
+- **날짜 정규화**(`_normalize_date_range`): 둘 다 없으면 날짜 파라미터 미전송(API가 최근 1건
+  반환) / 한쪽만 있거나 두 값이 같으면 앞뒤 `date_padding_days` 확장 / 서로 다른 구간은 그대로.
+- **건수 분기**: 0건 → `존재하지 않습니다.` / 1건 → 상세 반환 / 2건 이상 → 최신 1건 + `notice`
+- **최신순 정렬**(`_sort_by_recency`): 목록 API의 정렬 순서를 신뢰하지 않고 `create_on` 내림차순
+  정렬. 파싱 실패 시 문자열 비교 → `id` 내림차순으로 대체한다.
+- **`old` 제거**(`_strip_excluded_fields`): 이전 설정 전문은 `new`+`unified_diff`로 복원 가능한
+  파생 정보이므로 AI Agent 토큰 절약을 위해 반환하지 않는다.
+- 모든 실패(식별자 누락, 날짜 형식 오류, 상세 404, HTTP 오류)는 예외를 던지지 않고
+  `{found, total_count, message}` 구조로 변환한다.
+
+### MCP 도구
+
+| 도구명 | 설명 | 파라미터 |
+|--------|------|----------|
+| `get_diff_web` | WEB 설정(`http.m`) 변경 내역 조회 | `host_id`(필수), `start_date`, `end_date` |
+| `get_diff_was` | WAS 설정(`domain.xml`) 변경 내역 조회 | `domain_id`(필수), `start_date`, `end_date` |
+
+응답은 항상 동일한 JSON 구조다: `{"found", "total_count", "notice", "diff"}` 또는
+`{"found": false, "total_count": 0, "message"}`.
+
+### 의존성 흐름 및 설계 근거
+
+```
+server.py      →   client.py    →   config.py
+(get_diff_was,     (DiffClient:     (Settings,
+ get_diff_web:      단일 HTTP GET만   ResourceSpec,
+ 정규화/분기/정렬/    책임, 가공 없음)   경로·메시지 상수)
+ 응답 조립)
+```
+
+- **SRP**: `DiffClient`는 HTTP 호출만, 날짜 정규화·정렬·필드 제외·응답 조립은 `server.py`.
+- **OCP**: 조회 대상이 추가되면 `ResourceSpec` 인스턴스와 얇은 도구 래퍼만 추가하면 되고
+  공통 흐름 코드(`_get_diff`)는 수정하지 않는다.
+- **의존성 역전**: `DiffClient`는 `Settings`를 주입받아 동작하며 환경변수를 직접 읽지 않는다.
+- **하드코딩 금지**: API 경로, 필터 키, 설정 파일명, 날짜 형식, 여유일수, 제외 필드, 안내 문구를
+  모두 `config.py` 상수/환경변수로 관리하고 도구 설명도 이 상수로 조립한다.
+- 상세 요구사항은 [config_diff_mcp 요구사항 정의서](config_diff_mcp_requirements.md) 참조.

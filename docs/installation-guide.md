@@ -189,6 +189,7 @@ pip list | grep mcp-server-collection
 email-mcp --help
 extract-error-log-mcp --help
 error-rag-mcp --help
+config-diff-mcp --help
 ```
 
 또는 Python으로 직접 실행 확인:
@@ -197,6 +198,7 @@ error-rag-mcp --help
 python -c "from email_mcp.server import create_server; print('OK')"
 python -c "from extract_error_log_mcp.server import create_server; print('OK')"
 python -c "from error_rag_mcp.server import create_server; print('OK')"
+python -c "from config_diff_mcp.server import create_server; print('OK')"
 ```
 
 ---
@@ -219,18 +221,22 @@ API_BEARER_TOKEN=여기에_실제_JWT_토큰_입력
 API_SSL_VERIFY=false
 # 선택: 수신자 이름 매핑 (JSON 또는 이름:이메일 콤마 구분)
 EMAIL_RECIPIENT_MAPPING=홍길동:hong@example.com, 김철수:kim@example.com
+# 선택: 설정 변경 이력 조회 시 단일 일자 앞뒤 확장 일수 (config-diff-mcp 전용)
+DIFF_DATE_PADDING_DAYS=1
 ```
 
 | 변수 | 설명 | 필수 | 기본값 |
 |------|------|:----:|--------|
-| `API_BASE_URL` | EmailApi 서버 주소 | O | — |
+| `API_BASE_URL` | EmailApi/로그 추출/변경 이력 API 서버 주소 | O | — |
 | `API_BEARER_TOKEN` | JWT 인증 토큰 | O | — |
 | `API_SSL_VERIFY` | SSL 인증서 검증 여부 | X | `false` |
 | `API_TIMEOUT` | HTTP 요청 타임아웃(초) | X | `60` |
-| `EMAIL_RECIPIENT_MAPPING` | 수신자 이름-이메일 매핑 | X | — |
+| `EMAIL_RECIPIENT_MAPPING` | 수신자 이름-이메일 매핑 (`email-mcp` 전용) | X | — |
+| `DIFF_DATE_PADDING_DAYS` | 단일 일자 지정 시 앞뒤 확장 일수 (`config-diff-mcp` 전용) | X | `1` |
 
-> 위 표는 `email-mcp`/`extract-error-log-mcp`가 공유하는 환경변수이다. `error-rag-mcp`는 별도의
-> `RAG_*` 환경변수를 사용한다 ([5-5. Error RAG MCP 환경변수](#5-5-error-rag-mcp-환경변수) 참조).
+> 위 표는 `email-mcp`/`extract-error-log-mcp`/`config-diff-mcp`가 공유하는 환경변수이다.
+> `error-rag-mcp`만 별도의 `RAG_*` 환경변수를 사용한다
+> ([5-5. Error RAG MCP 환경변수](#5-5-error-rag-mcp-환경변수) 참조).
 
 ### 5-3. JWT 토큰 발급
 
@@ -452,13 +458,21 @@ VS Code `settings.json` (`Ctrl+Shift+P` → **Preferences: Open User Settings (J
         "RAG_COLLECTION_NAME": "여기에_실제_콜렉션_ID_입력",
         "RAG_DOMAIN_ID": "여기에_실제_도메인_ID_입력"
       }
+    },
+    "config-diff-mcp": {
+      "type": "stdio",
+      "command": "/home/사용자명/projects/email-mcp-server/.venv/bin/config-diff-mcp",
+      "env": {
+        "API_BASE_URL": "https://app.mwm.local:20443",
+        "API_BEARER_TOKEN": "your_jwt_token_here"
+      }
     }
   }
 }
 ```
 
-> `email-mcp`/`extract-error-log-mcp`는 `API_*` 변수를, `error-rag-mcp`는 `RAG_*` 변수를 쓴다는
-> 점만 다르고 등록 방식은 동일하다.
+> `email-mcp`/`extract-error-log-mcp`/`config-diff-mcp`는 `API_*` 변수를, `error-rag-mcp`는
+> `RAG_*` 변수를 쓴다는 점만 다르고 등록 방식은 동일하다.
 
 ---
 
@@ -467,7 +481,7 @@ VS Code `settings.json` (`Ctrl+Shift+P` → **Preferences: Open User Settings (J
 ### 7-1. MCP 서버 연결 확인
 
 1. VS Code에서 Claude 채팅 패널을 연다
-2. MCP 서버 목록에 **email-mcp**(및 등록한 경우 **extract-error-log-mcp**, **error-rag-mcp**)가 표시되는지 확인한다
+2. MCP 서버 목록에 **email-mcp**(및 등록한 경우 **extract-error-log-mcp**, **error-rag-mcp**, **config-diff-mcp**)가 표시되는지 확인한다
 3. 도구 목록에 `send_html_email`, `send_markdown_email`(그리고 등록한 서버의 도구)이 보이면 정상
 
 ### 7-2. 테스트 이메일 발송
@@ -558,6 +572,37 @@ Mermaid 다이어그램, 코드 블록, 표 등이 자동 변환된다.
 | `actor` | string | O | 조치자 | `"김철수"` |
 | `action_content` | string | O | 조치 내용 | `"커넥션 풀 크기 확장"` |
 
+### get_diff_web / get_diff_was (config-diff-mcp)
+
+WEB 서버 설정(`http.m`) 또는 WAS 도메인 설정(`domain.xml`)의 변경 내역을 조회한다.
+사용자가 `web`/`was` 대신 파일명(`http.m`/`domain.xml`)으로 지칭해도 같은 도구를 사용한다.
+
+| 파라미터 | 타입 | 필수 | 설명 | 예시 |
+|----------|------|:----:|------|------|
+| `host_id` | string | O | (`get_diff_web`) WEB 호스트 ID. '서버'/'시스템'이라고도 부름 | `"paaaa11"` |
+| `domain_id` | string | O | (`get_diff_was`) WAS 도메인 ID. **서버명으로는 조회 불가** | `"PAAA_Domain"` |
+| `start_date` | string | X | 조회 시작일 (`YYYY-MM-DD`) | `"2026-08-11"` |
+| `end_date` | string | X | 조회 종료일 (`YYYY-MM-DD`) | `"2026-08-15"` |
+
+- 날짜를 비우면 가장 최근 변경 1건을 반환한다.
+- 하루만 지목하면 앞뒤로 `DIFF_DATE_PADDING_DAYS`(기본 1일)만큼 여유를 두고 조회한다.
+- 0건이면 `존재하지 않습니다.`, 2건 이상이면 최신 1건 + 전체 건수 안내(`notice`)를 반환한다.
+- 응답에 이전 설정 전문(`old`)은 포함되지 않는다 (`new` + `unified_diff`로 복원 가능).
+
+### 사용 예시 (Claude 채팅, config-diff-mcp)
+
+```
+최근 paaaa11 서버에 web 변경 내역 알려줘
+```
+
+```
+8월 11일 was domain PAAA_Domain 설정 변경 내역 알려줘
+```
+
+```
+paaaa11 http.m 최근에 바뀐 거 있어?
+```
+
 ### 사용 예시 (Claude 채팅, error-rag-mcp)
 
 ```
@@ -606,8 +651,8 @@ pip install --no-index --find-links=./offline-packages-win -e .
 
 1. `.vscode/mcp.json`의 `command` 경로가 정확한지 확인
 2. 가상환경 내 실행파일 존재 여부 확인 (등록한 서버에 해당하는 것만):
-   - Windows: `.venv\Scripts\email-mcp.exe`, `.venv\Scripts\extract-error-log-mcp.exe`, `.venv\Scripts\error-rag-mcp.exe`
-   - Linux: `.venv/bin/email-mcp`, `.venv/bin/extract-error-log-mcp`, `.venv/bin/error-rag-mcp`
+   - Windows: `.venv\Scripts\email-mcp.exe`, `.venv\Scripts\extract-error-log-mcp.exe`, `.venv\Scripts\error-rag-mcp.exe`, `.venv\Scripts\config-diff-mcp.exe`
+   - Linux: `.venv/bin/email-mcp`, `.venv/bin/extract-error-log-mcp`, `.venv/bin/error-rag-mcp`, `.venv/bin/config-diff-mcp`
 3. 터미널에서 직접 실행해 에러 확인:
    ```bash
    .venv\Scripts\email-mcp.exe
@@ -652,7 +697,7 @@ email-mcp-server/
 ├── .env.example            ← 환경변수 템플릿
 ├── .vscode/
 │   └── mcp.json            ← VS Code MCP 서버 설정
-├── pyproject.toml           ← 프로젝트 메타데이터·의존성 (email-mcp/extract-error-log-mcp/error-rag-mcp 엔트리포인트)
+├── pyproject.toml           ← 프로젝트 메타데이터·의존성 (email-mcp/extract-error-log-mcp/error-rag-mcp/config-diff-mcp 엔트리포인트)
 ├── src/
 │   ├── email_mcp/
 │   │   ├── __init__.py
@@ -661,10 +706,14 @@ email-mcp-server/
 │   │   └── server.py        ← MCP 서버 엔트리포인트
 │   ├── extract_error_log_mcp/
 │   │   └── ... (config.py / client.py / server.py)
-│   └── error_rag_mcp/
-│       ├── config.py        ← Settings, 도메인 상수 (MAX_ERROR_SUMMARY_LENGTH 등)
-│       ├── client.py        ← llm-agent RAG API 클라이언트 (RagClient)
-│       └── server.py        ← search_similar_error / register_error_resolution 엔트리포인트
+│   ├── error_rag_mcp/
+│   │   ├── config.py        ← Settings, 도메인 상수 (MAX_ERROR_SUMMARY_LENGTH 등)
+│   │   ├── client.py        ← llm-agent RAG API 클라이언트 (RagClient)
+│   │   └── server.py        ← search_similar_error / register_error_resolution 엔트리포인트
+│   └── config_diff_mcp/
+│       ├── config.py        ← Settings, ResourceSpec(WAS/WEB), 경로·형식·메시지 상수
+│       ├── client.py        ← 변경 이력 API 클라이언트 (DiffClient)
+│       └── server.py        ← get_diff_was / get_diff_web 엔트리포인트
 ├── tests/                   ← 서버별 테스트 코드
 ├── scripts/
 │   └── send_test_email.py   ← 발송 테스트 스크립트
