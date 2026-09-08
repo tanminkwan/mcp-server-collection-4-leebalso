@@ -69,6 +69,9 @@
 ### 3.1 공통 처리 흐름 (두 도구 동일)
 
 ```
+[0] 필수 식별자(host_id / domain_id) 검증 — 없거나 공백이면
+    API 호출 없이 "되묻기 유도" 응답 반환하고 종료 (3.5절)
+      ↓
 [1] 입력 날짜 정규화 (4절)
       ↓
 [2] GET /diff_data/{resource}/list   (start_date, end_date, {filter_key})
@@ -91,7 +94,7 @@
 
   | 파라미터 | 타입 | 필수 | 설명 |
   |----------|------|------|------|
-  | `host_id` | str | 선택 | WEB 호스트 ID. 사용자가 '서버' 또는 '시스템'이라고 부르기도 한다 (예: `paaaa11`). 미지정 시 전체 호스트 대상 |
+  | `host_id` | str | **필수** | WEB 호스트 ID. 사용자가 '서버' 또는 '시스템'이라고 부르기도 한다 (예: `paaaa11`). **누락 시 조회하지 않고 사용자에게 되묻는다** (3.5절) |
   | `start_date` | str | 선택 | 조회 시작일 `YYYY-MM-DD` |
   | `end_date` | str | 선택 | 조회 종료일 `YYYY-MM-DD` |
 
@@ -101,6 +104,8 @@
     → `get_diff_web(host_id="paaaa11")` (날짜 미지정 = 최근 1건)
   - `"paaaa11 http.m 최근에 바뀐 거 있어?"`
     → `get_diff_web(host_id="paaaa11")` — `http.m`이 WEB 설정을 가리키므로 동일하게 처리
+  - `"web 설정 최근 변경 내역 알려줘"` (대상 서버 미지정)
+    → **호출하지 않고 사용자에게 "어느 서버(host_id)인지" 되묻는다** (3.5절)
 
 ### 3.3 `get_diff_was`
 - **목적**: WAS 도메인 설정 파일(`domain.xml`)의 변경 내역을 조회한다.
@@ -109,7 +114,7 @@
 
   | 파라미터 | 타입 | 필수 | 설명 |
   |----------|------|------|------|
-  | `domain_id` | str | 선택 | WAS 도메인 ID (예: `PAAA_Domain`). 미지정 시 전체 도메인 대상 |
+  | `domain_id` | str | **필수** | WAS 도메인 ID (예: `PAAA_Domain`). **누락 시 조회하지 않고 사용자에게 WAS 도메인 ID를 되묻는다** (3.5절) |
   | `start_date` | str | 선택 | 조회 시작일 `YYYY-MM-DD` |
   | `end_date` | str | 선택 | 조회 종료일 `YYYY-MM-DD` |
 
@@ -120,11 +125,14 @@
     → 서버가 `2026-08-10 ~ 2026-08-12`로 확장 (4.2절)
   - `"PAAA_Domain domain.xml 변경 이력 보여줘"`
     → `get_diff_was(domain_id="PAAA_Domain")` — `domain.xml`이 WAS 설정을 가리키므로 동일하게 처리
+  - `"was 설정 바뀐 거 있어?"` / `"paaaa11 서버 was 설정 변경 내역"` (도메인 미지정)
+    → **호출하지 않고 사용자에게 "WAS 도메인 ID가 무엇인지" 되묻는다** (3.5절).
+      후자처럼 서버명만 있는 경우도 마찬가지다 — WAS는 `host_id`로 조회할 수 없다
 
 > ⚠️ **WAS는 `host_id`로 필터링할 수 없다.** `/diff_data/was/list`가 지원하는 필터는 `domain_id`
-> 뿐이다. 사용자가 WAS에 대해 서버명(host_id)만 제시한 경우 AI Agent가 domain_id를 알아내야 하며,
-> 이 매핑은 본 서버의 범위가 아니다. 도구 설명(docstring)에 이 제약을 명시해 AI Agent가 잘못된
-> 값을 넣지 않도록 한다. (10절 Open Issue #2)
+> 뿐이다. 사용자가 WAS에 대해 서버명(host_id)만 제시한 경우 그 값을 `domain_id`에 넣어서는
+> **안 되며**, 사용자에게 WAS 도메인 ID를 되물어야 한다 (3.5절). 도구 설명(docstring)에 이
+> 제약을 명시해 AI Agent가 잘못된 값을 넣지 않도록 한다. (10절 Open Issue #2)
 
 ### 3.4 설정 파일명 별칭(alias) 처리
 
@@ -147,6 +155,28 @@
 - **테스트**: 두 도구의 `description`(docstring)에 각각 `http.m` / `domain.xml` 문자열이
   포함되는지를 검증하는 테스트를 둔다. 별칭이 설명에서 누락되면 AI Agent의 도구 선택이
   조용히 실패하므로, 이를 회귀 테스트로 고정한다.
+
+### 3.5 대상 식별자 누락 시 되묻기 (필수)
+
+`host_id`(WEB) / `domain_id`(WAS)는 **필수**다. 값이 없거나 공백 문자열이면 **API를 호출하지
+않고** 사용자에게 되묻도록 유도하는 응답을 반환한다.
+
+- **근거**: 대상 API의 필터 파라미터는 스펙상 선택(optional)이지만, 생략하면 **전체 호스트/전체
+  도메인**의 이력이 섞여 조회된다. 이때 "가장 최근 1건"은 사용자가 궁금해하는 서버와 무관한
+  엉뚱한 서버의 diff일 가능성이 높다. 조용히 틀린 답을 주는 것보다 되묻는 편이 안전하다.
+- **구현**:
+  1. 도구 시그니처에서 `host_id` / `domain_id`를 **필수 파라미터**로 선언한다.
+  2. 그럼에도 빈 문자열/공백만 전달될 수 있으므로, 서버가 `strip()` 후 비어 있는지 검증한다.
+     (`error_rag_mcp`가 빈 `error_keyword`를 가드하는 것과 동일한 패턴)
+  3. 검증 실패 시 6.4절의 오류 응답 구조로, **되묻기를 지시하는 메시지**를 반환한다.
+- **메시지** (`config.py` 상수로 관리 — 그라운드 룰 3):
+
+  | 상수 | 값 |
+  |------|-----|
+  | `MISSING_HOST_ID_MESSAGE` | `조회할 WEB 서버의 host_id가 필요합니다. 사용자에게 어느 서버(호스트)의 http.m 변경 내역인지 확인해 주세요.` |
+  | `MISSING_DOMAIN_ID_MESSAGE` | `조회할 WAS 도메인 ID(domain_id)가 필요합니다. 사용자에게 어느 WAS 도메인의 domain.xml 변경 내역인지 확인해 주세요. WAS는 서버명(host_id)으로는 조회할 수 없습니다.` |
+
+- 메시지는 AI Agent가 그대로 읽고 사용자에게 질문을 던질 수 있도록 **행동 지시형**으로 작성한다.
 
 ---
 
@@ -190,14 +220,17 @@
 
 ### 5.1 목록 조회 — `GET /diff_data/{resource}/list`
 
-**Query Parameters** (모두 선택)
+**Query Parameters** (API 스펙상 모두 선택)
 
-| 파라미터 | web | was | 설명 |
-|----------|-----|-----|------|
-| `start_date` | ✅ | ✅ | 시작일 `YYYY-MM-DD` |
-| `end_date` | ✅ | ✅ | 종료일 `YYYY-MM-DD` |
-| `host_id` | ✅ | ❌ | WEB 호스트 ID |
-| `domain_id` | ❌ | ✅ | WAS 도메인 ID |
+| 파라미터 | web | was | 설명 | MCP 도구에서의 필수 여부 |
+|----------|-----|-----|------|--------------------------|
+| `start_date` | ✅ | ✅ | 시작일 `YYYY-MM-DD` | 선택 |
+| `end_date` | ✅ | ✅ | 종료일 `YYYY-MM-DD` | 선택 |
+| `host_id` | ✅ | ❌ | WEB 호스트 ID | **필수** (3.5절) |
+| `domain_id` | ❌ | ✅ | WAS 도메인 ID | **필수** (3.5절) |
+
+> API는 `host_id`/`domain_id` 없이도 호출되지만(전체 대상 조회), **MCP 도구 레벨에서는 필수로
+> 강제**한다. 근거는 3.5절 참조.
 
 **Response 200** — JSON 배열
 
@@ -302,8 +335,18 @@ AI Agent가 파싱하기 쉽도록 **항상 동일한 구조의 JSON 문자열**
 { "found": false, "total_count": 0, "message": "<오류 사유>" }
 ```
 
-날짜 형식 오류, 상세 404, HTTP 오류 등 모든 실패는 예외를 그대로 던지지 않고 위 구조로 변환한다.
-(MCP 도구가 예외를 던지면 AI Agent 쪽에서 원인 파악이 어렵다.)
+날짜 형식 오류, 상세 404, HTTP 오류, **식별자 누락(3.5절)** 등 모든 실패는 예외를 그대로 던지지
+않고 위 구조로 변환한다. (MCP 도구가 예외를 던지면 AI Agent 쪽에서 원인 파악이 어렵다.)
+
+식별자 누락 예 — AI Agent가 이 메시지를 읽고 사용자에게 되묻는다:
+
+```json
+{
+  "found": false,
+  "total_count": 0,
+  "message": "조회할 WAS 도메인 ID(domain_id)가 필요합니다. 사용자에게 어느 WAS 도메인의 domain.xml 변경 내역인지 확인해 주세요. WAS는 서버명(host_id)으로는 조회할 수 없습니다."
+}
+```
 
 ---
 
@@ -338,6 +381,8 @@ AI Agent가 파싱하기 쉽도록 **항상 동일한 구조의 JSON 문자열**
 | `DEFAULT_DATE_PADDING_DAYS` | `1` | 여유일수 기본값 |
 | `EXCLUDED_DETAIL_FIELDS` | `("old",)` | 상세 응답 제외 필드 |
 | `NOT_FOUND_MESSAGE` | `존재하지 않습니다.` | 0건 메시지 |
+| `MISSING_HOST_ID_MESSAGE` | (3.5절) | `host_id` 누락 시 되묻기 유도 메시지 |
+| `MISSING_DOMAIN_ID_MESSAGE` | (3.5절) | `domain_id` 누락 시 되묻기 유도 메시지 |
 | `MULTIPLE_RESULT_NOTICE_TEMPLATE` | (6.3절) | 다건 안내 문구 |
 | `DEFAULT_SSL_VERIFY` / `DEFAULT_TIMEOUT` | `False` / `60` | 기존 서버와 동일 |
 
@@ -386,6 +431,10 @@ tests/config_diff_mcp/
   > "최근 ~ 서버 web 설정 바뀐 거 있어?", "8월 11일 WAS 도메인 설정 변경 내역 알려줘",
   > "paaaa11 http.m 언제 바뀌었어?", "PAAA_Domain domain.xml 변경 이력 보여줘" 같은 요청이
   > 트리거입니다.
+  > **조회 대상은 반드시 지정해야 합니다** — `get_diff_web`은 `host_id`(서버/시스템),
+  > `get_diff_was`는 `domain_id`(WAS 도메인)가 필수입니다. 사용자가 대상을 말하지 않았다면
+  > 추측하거나 비워서 호출하지 말고 사용자에게 되물으세요. 특히 WAS는 서버명으로 조회할 수 없어,
+  > 서버명만 알고 있다면 WAS 도메인 ID를 사용자에게 확인해야 합니다.
   > 날짜를 언급하지 않으면 `start_date`/`end_date`를 비워 호출하세요 — 가장 최근 1건이 반환됩니다.
   > 날짜는 반드시 `YYYY-MM-DD` 형식으로 변환해 전달해야 하며, 연도를 사용자가 말하지 않았다면
   > 현재 시각을 기준으로 Agent가 판단해 채워야 합니다.
@@ -393,6 +442,7 @@ tests/config_diff_mcp/
   - **대상 설정 파일명** — `get_diff_was`는 `domain.xml`, `get_diff_web`은 `http.m`.
     사용자가 파일명으로만 지칭해도 해당 도구가 선택되도록 하는 근거이다 (3.4절)
   - `host_id`는 사용자가 '서버' 또는 '시스템'이라고 부르기도 한다는 점
+  - **`host_id`/`domain_id`는 필수**이며, 모르면 추측하지 말고 사용자에게 되물어야 한다는 점 (3.5절)
   - **WAS는 `domain_id`만 필터 가능**하고 `host_id`로는 조회할 수 없다는 점 (3.3절)
   - 하루만 지목하면 서버가 앞뒤 1일씩 확장해 조회한다는 점
   - 응답에 `old`(이전 설정 전문)가 포함되지 않으며, 필요하면 `new`와 `unified_diff`로 복원하라는 점
@@ -434,8 +484,9 @@ OpenAPI 문서에는 `security: [{ jwt: [] }]`로 선언되어 있으나 실제 
 사용자가 WAS에 대해 서버명만 말하는 경우(`"paaaa11 서버 WAS 설정 변경 내역"`) `/diff_data/was/list`는
 `host_id` 필터를 지원하지 않아 조회할 수 없다.
 
-- **현재 설계**: 매핑을 제공하지 않고, 도구 설명에 제약을 명시해 AI Agent가 `domain_id`를 되묻거나
-  다른 경로로 알아내도록 한다.
+- **현재 설계 (확정)**: 매핑을 제공하지 않는다. `domain_id`를 **필수 파라미터**로 두고, 누락 시
+  `MISSING_DOMAIN_ID_MESSAGE`로 **사용자에게 WAS 도메인 ID를 되묻도록 유도**한다 (3.5절).
+  서버명을 `domain_id`에 그대로 넣는 오용을 막기 위해 도구 설명에도 제약을 명시한다.
 - **대안(범위 밖)**: 호스트→도메인 매핑 API가 별도로 존재한다면 이를 조회하는 단계를 추가할 수
   있다. 해당 API 존재 여부 확인 필요.
 
@@ -472,7 +523,8 @@ vs ISO-8601)은 #1 때문에 실제 응답으로 확인하지 못했다.
 - [ ] `tests/config_diff_mcp/test_config.py` 작성 → `src/config_diff_mcp/config.py` 구현
 - [ ] `tests/config_diff_mcp/test_client.py` 작성 → `src/config_diff_mcp/client.py` 구현
 - [ ] `tests/config_diff_mcp/test_server.py` 작성 → `src/config_diff_mcp/server.py` 구현
-      (도구 설명에 `domain.xml` / `http.m` 별칭이 포함되는지 검증 포함 — 3.4절)
+      (도구 설명에 `domain.xml` / `http.m` 별칭이 포함되는지 검증 — 3.4절,
+       `host_id`/`domain_id` 누락·공백 시 API 호출 없이 되묻기 메시지 반환 검증 — 3.5절)
 - [ ] `pyproject.toml` 엔트리포인트·커버리지 대상 추가
 - [ ] `.env.example`에 `DIFF_DATE_PADDING_DAYS` 추가
 - [ ] 실제 서버 대상 end-to-end 검증 (`create_on` 포맷 확인 → #3 갱신)
