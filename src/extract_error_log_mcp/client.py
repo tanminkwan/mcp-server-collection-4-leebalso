@@ -6,7 +6,12 @@ from typing import Any
 
 import httpx
 
-from extract_error_log_mcp.config import Settings
+from extract_error_log_mcp.config import (
+    MAX_PARAM,
+    MDCONTENT_LIST_MAX,
+    SEARCH_TAGS_PARAM,
+    Settings,
+)
 
 
 class ExtractLogClient:
@@ -27,8 +32,8 @@ class ExtractLogClient:
     async def get_mdcontent_list(self, search_tags: str) -> dict[str, Any]:
         """search_tags로 mdcontent 목록을 조회한다."""
         params = {
-            "search_tags": search_tags,
-            "max": 1,
+            SEARCH_TAGS_PARAM: search_tags,
+            MAX_PARAM: MDCONTENT_LIST_MAX,
         }
         return await self._get(self._settings.mdcontent_list_url, params=params)
 

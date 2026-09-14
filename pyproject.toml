@@ -34,7 +34,14 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "--cov=email_mcp --cov=error_rag_mcp --cov=config_diff_mcp --cov=read_server_file_mcp --cov=mcp_common --cov-report=term-missing --cov-fail-under=85"
+addopts = "--cov=email_mcp --cov=extract_error_log_mcp --cov=error_rag_mcp --cov=config_diff_mcp --cov=read_server_file_mcp --cov=mcp_common --cov-report=term-missing --cov-fail-under=85"
 
 [tool.coverage.run]
-source = ["src/email_mcp", "src/error_rag_mcp", "src/config_diff_mcp", "src/read_server_file_mcp", "src/mcp_common"]
+source = [
+    "src/email_mcp",
+    "src/extract_error_log_mcp",
+    "src/error_rag_mcp",
+    "src/config_diff_mcp",
+    "src/read_server_file_mcp",
+    "src/mcp_common",
+]

@@ -140,9 +140,9 @@ src/email_mcp/
 ```
 src/extract_error_log_mcp/
 ├── __init__.py
-├── config.py        # Settings, 엔드포인트 경로 상수
-├── client.py         # ExtractLogClient — httpx 기반 GET/POST
-└── server.py         # request_extract_log / get_extracted_log 도구 등록, main
+├── config.py        # Settings, 엔드포인트 경로·검증 규칙·메시지 상수
+├── client.py        # ExtractLogClient — httpx 기반 GET/POST
+└── server.py        # request_extract_log / get_extracted_log 도구 등록, main
 ```
 
 ### 모듈 설명
@@ -150,6 +150,13 @@ src/extract_error_log_mcp/
 #### config.py — 설정 관리
 - `email_mcp`와 동일한 `.env`(`API_BASE_URL`, `API_BEARER_TOKEN`, `API_SSL_VERIFY`)를 공유
 - 엔드포인트 경로 상수: `EXTRACT_LOG_PATH`, `MDCONTENT_LIST_PATH`, `MDCONTENT_GET_PATH`
+- 입력 검증 규칙: `DATE_PATTERN`(yyyymmdd), `TIME_PATTERN`(hhmiss), `WAS_INSTANCE_TOKEN`(`_MS`)
+- 요청/응답 키: `PAYLOAD_*_KEY`, `SEARCH_TAGS_PARAM`, `MAX_PARAM`, `MDCONTENT_LIST_MAX`,
+  `DATA_KEY`, `CONTENT_ID_KEY`
+- 응답 메시지 상수: `INVALID_DATE_MESSAGE`, `INVALID_TIME_MESSAGE`,
+  `INVALID_TIME_ORDER_MESSAGE`, `INVALID_WAS_INSTANCE_MESSAGE`,
+  `MDCONTENT_NOT_FOUND_MESSAGE_TEMPLATE`, `NO_CONTENT_ID_MESSAGE_TEMPLATE`,
+  `REQUEST_FAILED_MESSAGE_TEMPLATE`, `RESULT_FAILED_MESSAGE_TEMPLATE`
 
 #### client.py — ExtractLogClient
 - `request_extract_log()`: 로그 추출 요청 (`POST /api/v1/command_master/extract_log`)
@@ -159,6 +166,15 @@ src/extract_error_log_mcp/
 #### server.py — MCP 서버
 - `request_extract_log`: 입력 포맷 검증(날짜/시간/인스턴스ID) 후 추출 요청, `command_id` 반환
 - `get_extracted_log`: `command_id` → 목록 조회로 `content_id` 획득 → 상세 조회(2단계 연속 호출)
+- 두 도구 모두 `@limit_response_size(settings)`로 응답 크기 한도가 적용된다
+  ([0. 공통 모듈](#0-공통-모듈-mcp_common) 참조)
+
+### 설계 근거 (SOLID)
+
+- **SRP**: `ExtractLogClient`는 HTTP 호출만, 입력 검증·응답 조립은 `server.py`.
+- **의존성 역전**: `ExtractLogClient`는 `Settings`를 주입받아 동작하며 환경변수를 직접 읽지 않는다.
+- **하드코딩 금지**: API 경로, 검증용 정규식, 요청/응답 키, 안내·오류 문구를 모두 `config.py`
+  상수로 관리한다.
 
 ### MCP 도구
 
