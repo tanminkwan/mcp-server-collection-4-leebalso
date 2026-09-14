@@ -181,7 +181,7 @@ pip install --no-index --find-links=./offline-packages-win -e .
 pip list | grep mcp-server-collection
 ```
 
-출력 예시: `mcp-server-collection  0.1.0  /path/to/email-mcp-server`
+출력 예시: `mcp-server-collection  0.4.0  /path/to/email-mcp-server`
 
 ### 4-3. 설치 검증
 

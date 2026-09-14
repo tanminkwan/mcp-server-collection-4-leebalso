@@ -1,6 +1,6 @@
 # MCP Server Collection
 
-**Email 발송, 에러 로그 추출, 오류/조치 RAG 검색·등록, 설정 변경 이력 조회 기능을 제공하는 독립적인 MCP(Model Context Protocol) 서버 모음**
+**Email 발송, 에러 로그 추출, 오류/조치 RAG 검색·등록, 설정 변경 이력 조회, 서버 파일 읽기 기능을 제공하는 독립적인 MCP(Model Context Protocol) 서버 모음**
 
 각 서버는 완전히 독립된 패키지(`config`/`client`/`server` 3계층)로 구성되며, stdio 전송 방식으로 동작해
 VS Code의 Claude 확장 등 MCP 클라이언트에서 도구로 사용할 수 있습니다.
@@ -13,6 +13,7 @@ VS Code의 Claude 확장 등 MCP 클라이언트에서 도구로 사용할 수 �
 | Extract Error Log MCP | `extract_error_log_mcp` | `extract-error-log-mcp` | 서버 에러 로그 추출 요청 및 결과 조회 | [설계서](docs/extract_error_log_mcp_design.md) |
 | Error RAG MCP | `error_rag_mcp` | `error-rag-mcp` | 오류/조치 사례를 RAG 서비스(llm-agent)에서 검색·등록 | [요구사항 정의서](docs/error_rag_mcp_requirements.md) |
 | Config Diff MCP | `config_diff_mcp` | `config-diff-mcp` | WAS(`domain.xml`)/WEB(`http.m`) 설정 변경 이력 조회 | [요구사항 정의서](docs/config_diff_mcp_requirements.md) |
+| Read Server File MCP | `read_server_file_mcp` | `read-server-file-mcp` | 서버(호스트)의 특정 위치 파일 내용 읽기 | [요구사항 정의서](docs/read_server_file_mcp_requirements.md) |
 
 ## 주요 기능
 
@@ -26,6 +27,8 @@ VS Code의 Claude 확장 등 MCP 클라이언트에서 도구로 사용할 수 �
 | Error RAG MCP | `register_error_resolution` | 오류 및 조치 결과를 표준 보고서 형식으로 RAG에 등록 |
 | Config Diff MCP | `get_diff_web` | WEB 설정(`http.m`) 변경 내역 조회 |
 | Config Diff MCP | `get_diff_was` | WAS 설정(`domain.xml`) 변경 내역 조회 |
+| Read Server File MCP | `request_read_server_file` | 서버의 특정 위치 파일 읽기 명령 주문 (command_id 반환) |
+| Read Server File MCP | `get_read_server_file_result` | command_id로 파일 위치·파일 내용 조회 |
 
 ## 빠른 시작
 
@@ -46,20 +49,22 @@ email-mcp
 extract-error-log-mcp
 error-rag-mcp
 config-diff-mcp
+read-server-file-mcp
 ```
 
 ## 환경변수
 
-### Email MCP / Extract Error Log MCP / Config Diff MCP (공유)
+### Email MCP / Extract Error Log MCP / Config Diff MCP / Read Server File MCP (공유)
 
 | 변수 | 설명 | 필수 | 기본값 |
 |------|------|:----:|--------|
-| `API_BASE_URL` | EmailApi/로그 추출/변경 이력 API 서버 주소 | O | — |
+| `API_BASE_URL` | EmailApi/로그 추출/변경 이력/명령 API 서버 주소 | O | — |
 | `API_BEARER_TOKEN` | JWT 인증 토큰 | O | — |
 | `API_SSL_VERIFY` | SSL 인증서 검증 여부 | X | `false` |
 | `API_TIMEOUT` | HTTP 요청 타임아웃(초) | X | `60` |
 | `EMAIL_RECIPIENT_MAPPING` | 수신자 이름-이메일 매핑 (JSON 또는 `이름:이메일` 콤마 구분, Email MCP 전용) | X | — |
 | `DIFF_DATE_PADDING_DAYS` | 단일 일자 지정 시 앞뒤로 확장할 일수 (Config Diff MCP 전용) | X | `1` |
+| `READ_SERVER_FILE_RESULT_WAIT_SECONDS` | 파일 읽기 주문 후 결과 조회까지 권장 대기 시간(초) (Read Server File MCP 전용) | X | `30` |
 
 > **수신자 이름 매핑 (`EMAIL_RECIPIENT_MAPPING`)**:
 > - `EMAIL_RECIPIENT_MAPPING` 환경변수에 이름과 이메일 주소를 등록하면, 이메일 발송 시 `receivers`에 이메일 주소 대신 이름만 지정해도 서버가 자동으로 이메일 주소로 변환합니다.
@@ -315,6 +320,52 @@ PICI_Domain domain.xml 변경 이력 보여줘
 
 > 자세한 설계 근거는 [요구사항 정의서](docs/config_diff_mcp_requirements.md)를 참조하세요.
 
+### Read Server File MCP
+
+서버(호스트)의 특정 위치에 있는 파일 내용을 읽습니다. 실제 파일 읽기는 대상 호스트에 설치된
+에이전트가 수행하므로, **명령 주문 → 대기 → 결과 조회**의 2단계로 동작합니다.
+
+#### request_read_server_file
+
+파일 읽기 명령을 주문하고 `command_id`를 반환합니다. `host_id`로 해당 호스트의 `agent_id`를
+자동으로 찾아(`ag_agent` 조회) 그 에이전트에게 명령을 하달합니다.
+
+| 파라미터 | 타입 | 필수 | 설명 |
+|----------|------|:----:|------|
+| `host_id` | string | O | 대상 서버 ID ('서버'/'호스트'/'시스템'이라고도 부름, 예: `pcbkaa11`). 모르면 사용자에게 되물어야 합니다 |
+| `file_path` | string | O | 읽을 파일의 **절대 경로** (예: `/var/log/messages`, `C:\logs\app.log`). 상대 경로·`..` 불가 |
+
+이 도구는 명령을 주문만 하며 파일 내용은 반환하지 않습니다. 응답 `notice`에 안내된 시간
+(`READ_SERVER_FILE_RESULT_WAIT_SECONDS`, 기본 30초)만큼 대기한 뒤 결과를 조회해야 합니다.
+
+#### get_read_server_file_result
+
+| 파라미터 | 타입 | 필수 | 설명 |
+|----------|------|:----:|------|
+| `command_id` | string | O | `request_read_server_file` 호출 결과로 받은 명령 ID |
+
+응답의 주요 필드는 다음과 같습니다.
+
+| 필드 | 설명 |
+|------|------|
+| `file_path` | 실제로 읽으라고 지시된 파일 위치 (API의 `additional_params`) |
+| `result_text` | **파일 내용 또는 오류 메시지** (원문 그대로) |
+| `agent_error_sentinel` | `result_text`가 에이전트의 알려진 오류 문구와 정확히 일치하면 그 값, 아니면 `null` |
+
+**동작 규칙**
+
+- `found`가 `false`이면 에이전트가 아직 결과를 반환하지 않은 것입니다. 잠시 더 기다렸다가 같은
+  `command_id`로 다시 조회하세요 (오류가 아닙니다).
+- `result_text`에는 파일 내용이 올 수도 있지만 `Error:FileNotFoundException` 같은 **오류 메시지가
+  올 수도 있습니다**. 어느 쪽인지는 **호출한 AI Agent가 내용을 보고 판단**해야 합니다.
+- `agent_error_sentinel`은 판단을 돕는 보조 힌트일 뿐입니다. 알려진 오류 문구
+  (`Error:FileNotFoundException`, `Error:IOException`, `Error:UnsupportedEncodingException`,
+  `Error:NoSuchAlgorithmException`, `NO CHANGE`)와 **완전히 일치**할 때만 채워지며, `null`이라고
+  해서 반드시 정상 파일 내용이라는 보장은 아닙니다.
+- `host_id`로 등록된 에이전트가 없으면 명령을 만들지 않고 그 사유를 반환합니다.
+
+> 자세한 설계 근거는 [요구사항 정의서](docs/read_server_file_mcp_requirements.md)를 참조하세요.
+
 ## 프로젝트 구조
 
 ```
@@ -331,10 +382,14 @@ src/
 │   ├── config.py     ← Settings, 도메인 상수(MAX_ERROR_SUMMARY_LENGTH 등)
 │   ├── client.py     ← llm-agent RAG API 클라이언트 (RagClient)
 │   └── server.py     ← search_similar_error / register_error_resolution 등록
-└── config_diff_mcp/
-    ├── config.py     ← Settings, ResourceSpec(WAS/WEB), 경로·형식·메시지 상수
-    ├── client.py     ← 변경 이력 API 클라이언트 (DiffClient)
-    └── server.py     ← get_diff_was / get_diff_web 등록
+├── config_diff_mcp/
+│   ├── config.py     ← Settings, ResourceSpec(WAS/WEB), 경로·형식·메시지 상수
+│   ├── client.py     ← 변경 이력 API 클라이언트 (DiffClient)
+│   └── server.py     ← get_diff_was / get_diff_web 등록
+└── read_server_file_mcp/
+    ├── config.py     ← Settings, 명령 타입·조회 조건·오류 문구·메시지 상수
+    ├── client.py     ← 에이전트 조회/명령 생성/결과 조회 클라이언트 (ReadServerFileClient)
+    └── server.py     ← request_read_server_file / get_read_server_file_result 등록
 ```
 
 ## 테스트

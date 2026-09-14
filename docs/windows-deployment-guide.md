@@ -14,7 +14,7 @@ source .venv/bin/activate
 # 빌드 도구가 없다면 설치: pip install build
 python -m build
 ```
-빌드가 완료되면 프로젝트 내 `dist/` 폴더 아래에 `mcp_server_collection-0.1.0-py3-none-any.whl` (버전에 따라 다름) 파일이 생성됩니다.
+빌드가 완료되면 프로젝트 내 `dist/` 폴더 아래에 `mcp_server_collection-0.4.0-py3-none-any.whl` (버전에 따라 다름) 파일이 생성됩니다.
 
 ### 1-2. Windows 타겟 오프라인 패키지 구성
 Windows 64bit 환경에서 구동될 수 있도록 외부 의존성 라이브러리 파일들을 다운로드합니다.
@@ -27,7 +27,7 @@ pip download --platform win_amd64 --python-version 3.14 --only-binary=:all: -d .
 
 ### 1-3. 전송할 파일 정리
 이제 보안상 노출될 필요가 없는 소스 코드(`src/` 등)는 제외하고, 아래 항목들만 USB나 망연계 시스템을 통해 대상 Windows PC로 전송합니다.
-1. `dist/mcp_server_collection-0.1.0-py3-none-any.whl` (방금 빌드한 MCP 서버 모음 본체 파일)
+1. `dist/mcp_server_collection-0.4.0-py3-none-any.whl` (방금 빌드한 MCP 서버 모음 본체 파일)
 2. `offline-packages-win/` 폴더 통째로 (의존성 라이브러리 묶음)
 3. Windows용 파이썬 오프라인 설치 파일 (예: `python-3.14.x-amd64.exe` - 윈도우 환경에 파이썬이 없는 경우)
 
@@ -55,7 +55,7 @@ python -m venv .venv
 ```powershell
 # mcp_server_collection 파일명은 실제 생성된 버전에 맞게 수정하여 입력합니다.
 # 이미 동일한 버전이 설치되어 있어도 덮어쓰도록 --force-reinstall 옵션을 사용합니다.
-pip install mcp_server_collection-0.1.0-py3-none-any.whl --no-index --find-links=./offline-packages-win --force-reinstall
+pip install mcp_server_collection-0.4.0-py3-none-any.whl --no-index --find-links=./offline-packages-win --force-reinstall
 ```
 이 과정에서 소스 코드를 참조하지 않고(`.whl` 파일 기반), 오프라인 패키지 폴더에서 필요한 라이브러리를 모두 가져와 설치가 완료됩니다.
 
@@ -70,6 +70,7 @@ pip install mcp_server_collection-0.1.0-py3-none-any.whl --no-index --find-links
 .venv\Scripts\extract-error-log-mcp.exe
 .venv\Scripts\error-rag-mcp.exe
 .venv\Scripts\config-diff-mcp.exe
+.venv\Scripts\read-server-file-mcp.exe
 ```
 실행했을 때 `ModuleNotFoundError` 같은 에러 없이 무한 대기 상태로 진입한다면 완벽하게 설치된 것입니다.
 
@@ -81,7 +82,7 @@ pip install mcp_server_collection-0.1.0-py3-none-any.whl --no-index --find-links
 실행 디렉토리(`C:\mcp-server`)에 `.env` 파일을 만들고 아래와 같이 설정합니다.
 
 ```env
-# email-mcp / extract-error-log-mcp / config-diff-mcp 공유 설정
+# email-mcp / extract-error-log-mcp / config-diff-mcp / read-server-file-mcp 공유 설정
 API_BASE_URL=https://app.mwm.local:20443
 API_BEARER_TOKEN=발급받은_JWT_토큰_입력
 API_SSL_VERIFY=false
@@ -99,13 +100,17 @@ RAG_DOMAIN_ID=여기에_실제_도메인_ID_입력
 # config-diff-mcp 전용 설정 (접속 정보는 위 API_* 를 공유)
 # 선택: 단일 일자만 지정됐을 때 앞뒤로 확장할 일수 (기본 1일)
 DIFF_DATE_PADDING_DAYS=1
+
+# read-server-file-mcp 전용 설정 (접속 정보는 위 API_* 를 공유)
+# 선택: 파일 읽기 주문 후 결과 조회까지 권장 대기 시간(초, 기본 30)
+READ_SERVER_FILE_RESULT_WAIT_SECONDS=30
 ```
 
 *참고: `EMAIL_RECIPIENT_MAPPING`을 설정하면 이메일 주소 대신 `홍길동` 같은 수신자 이름만 전달해도 자동으로 이메일 주소로 변환하여 발송합니다.*
 
 이제 VS Code의 `mcp.json`이나 클라이언트 설정 파일에서 `command` 경로를 서버별로 지정하여 사용하시면 됩니다
 (예: `C:\mcp-server\.venv\Scripts\email-mcp.exe`, `C:\mcp-server\.venv\Scripts\error-rag-mcp.exe`,
-`C:\mcp-server\.venv\Scripts\config-diff-mcp.exe`)!
+`C:\mcp-server\.venv\Scripts\config-diff-mcp.exe`, `C:\mcp-server\.venv\Scripts\read-server-file-mcp.exe`)!
 
 
 ---
@@ -114,7 +119,42 @@ DIFF_DATE_PADDING_DAYS=1
 
 보안상 소스 코드를 반출하는 것이 문제가 되지 않아서, 소스 코드를 통째로 Windows 환경으로 가져간 뒤 윈도우에서 직접 `.whl` 파일을 구워내고 싶다면 아래 절차를 따릅니다.
 
-### 4-1. 빌드 도구 오프라인 패키지 준비 (Linux 등 인터넷 연결 환경)
+### 4-1. 반입할 소스 파일 범위
+
+빌드에 **반드시 필요한 것은 `pyproject.toml`과 `src/` 뿐**입니다 (총 21개 파일). 이 둘만으로
+인터넷 환경에서 빌드한 것과 동일한 `.whl`이 생성되는 것을 확인했습니다.
+
+```
+pyproject.toml                      ← 빌드 설정·메타데이터·엔트리포인트 정의
+src/
+├── email_mcp/              {__init__,config,client,server}.py
+├── extract_error_log_mcp/  {__init__,config,client,server}.py
+├── error_rag_mcp/          {__init__,config,client,server}.py
+├── config_diff_mcp/        {__init__,config,client,server}.py
+└── read_server_file_mcp/   {__init__,config,client,server}.py
+```
+
+**반입하면 안 되는 항목 (반드시 제외)**
+
+| 항목 | 이유 |
+|------|------|
+| `.env` | **API Bearer 토큰 등 비밀정보 포함**. 대상 PC에서 `.env.example`을 보고 새로 작성한다 (3장 참조) |
+| `.venv/` | 빌드 PC의 OS·경로에 묶인 가상환경. 대상 PC에서 새로 만든다 |
+| `build/`, `dist/`, `src/*.egg-info/` | 이전 빌드 잔여물. 남아 있으면 빌드 결과가 오염될 수 있다 |
+| `__pycache__/`, `*.pyc` | 컴파일 캐시 |
+
+Linux에서 아래와 같이 반입용 묶음을 만들면 위 제외 항목이 자동으로 빠집니다.
+
+```bash
+tar czf mcp-src-0.4.0.tar.gz \
+  --exclude='__pycache__' --exclude='*.egg-info' --exclude='*.pyc' \
+  pyproject.toml src/
+```
+
+> 설치·운영에 참고할 `README.md`, `docs/`, `.env.example`은 빌드에 필요하지 않지만 함께 가져가면
+> 대상 PC에서 환경 변수 설정(3장)에 유용합니다.
+
+### 4-2. 빌드 도구 오프라인 패키지 준비 (Linux 등 인터넷 연결 환경)
 파이썬의 패키지 빌드 도구들은 순수 파이썬 라이브러리(Pure Python)이므로 OS에 종속되지 않습니다.
 프로젝트 최상위에서 `tmp` 폴더를 만들고 빌드용 패키지를 다운로드합니다.
 
@@ -122,9 +162,13 @@ DIFF_DATE_PADDING_DAYS=1
 mkdir -p tmp
 pip download -d ./tmp build setuptools wheel
 ```
-이제 소스 코드 전체와 `tmp` 폴더, 그리고 `offline-packages-win` 폴더를 모두 Windows로 가져갑니다.
+> ⚠️ `offline-packages-win/`에는 **런타임 의존성만** 들어 있고 `build`/`setuptools`/`wheel`은
+> 포함되어 있지 않습니다. 이 단계를 건너뛰면 오프라인 빌드가 실패하므로 반드시 별도로 받아야 합니다.
 
-### 4-2. Windows에서 오프라인으로 빌드하기
+이제 4-1에서 정리한 소스(`pyproject.toml` + `src/`)와 `tmp` 폴더, 그리고 `offline-packages-win`
+폴더를 모두 Windows로 가져갑니다.
+
+### 4-3. Windows에서 오프라인으로 빌드하기
 Windows 가상환경(`.venv`)을 켠 상태에서, 가져온 `tmp` 폴더를 이용해 빌드 도구들을 먼저 오프라인 설치합니다.
 
 ```powershell
@@ -139,6 +183,27 @@ python -m build --no-isolation
 원래 `python -m build`를 실행하면 인터넷에서 임시 환경(Isolation) 구축을 위한 라이브러리들을 자동으로 다운받으려고 시도합니다. 인터넷이 차단된 오프라인 환경에서는 이 과정에서 에러가 발생하므로, `--no-isolation` 옵션을 주어 "미리 설치해둔(tmp에서 가져온) 도구들을 그대로 사용하여 임시 환경 없이 빌드하라"고 강제하는 것입니다.
 
 빌드가 끝나면 `dist/` 폴더에 `.whl` 파일이 생성되며, 이후 설치는 본 문서의 `2-3. 오프라인 설치` 단계와 동일하게 진행하시면 됩니다.
+
+### 4-4. [선택] 대상 PC에서 테스트까지 실행하려면
+
+빌드만 할 경우에는 필요 없습니다. 폐쇄망에서 `pytest`로 검증까지 하려면 아래를 추가로 반입합니다.
+
+1. `tests/` 디렉터리 전체 (서버별 하위 디렉터리 포함)
+2. 테스트 의존성 오프라인 패키지 — 인터넷 환경에서 미리 받아 둡니다.
+   ```bash
+   pip download --platform win_amd64 --python-version 3.14 --only-binary=:all: \
+     -d ./tmp-test pytest pytest-cov pytest-asyncio respx
+   ```
+
+대상 PC에서 설치 후 실행합니다.
+
+```powershell
+pip install --no-index --find-links=.\tmp-test pytest pytest-cov pytest-asyncio respx
+pytest
+```
+
+> `pyproject.toml`에 `--cov-fail-under=85`가 설정되어 있어 커버리지가 85% 미만이면 테스트가
+> 실패 처리됩니다 (프로젝트 그라운드 룰).
 
 ---
 
@@ -160,7 +225,7 @@ python -m build --no-isolation
 
 3. **오프라인 재빌드**
    수정된 코드를 바탕으로 새로운 휠(`.whl`) 파일을 빌드합니다. 인터넷이 없으므로 반드시 `--no-isolation` 옵션을 사용해야 합니다.
-   *(※ 4-2 단계의 빌드 도구가 이미 설치되어 있어야 합니다.)*
+   *(※ 4-3 단계의 빌드 도구가 이미 설치되어 있어야 합니다.)*
    ```powershell
    python -m build --no-isolation
    ```
@@ -169,5 +234,5 @@ python -m build --no-isolation
    새로 빌드된 패키지를 `--force-reinstall` 옵션으로 덮어씌웁니다. 외부 라이브러리 참조를 위해 기존 `offline-packages-win` 폴더도 함께 지정합니다.
    ```powershell
    # 실제 dist 폴더에 생성된 버전에 맞게 파일명 수정
-   pip install .\dist\mcp_server_collection-0.1.0-py3-none-any.whl --no-index --find-links=.\offline-packages-win --force-reinstall
+   pip install .\dist\mcp_server_collection-0.4.0-py3-none-any.whl --no-index --find-links=.\offline-packages-win --force-reinstall
    ```
