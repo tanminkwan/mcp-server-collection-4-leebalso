@@ -38,8 +38,18 @@ config-diff-mcp
 | `API_TIMEOUT` | HTTP 요청 타임아웃(초) | X | `60` |
 | `EMAIL_RECIPIENT_MAPPING` | 수신자 이름-이메일 매핑 (JSON 또는 `이름:이메일` 콤마 구분, Email MCP 전용) | X | — |
 | `DIFF_DATE_PADDING_DAYS` | 단일 일자 지정 시 앞뒤로 확장할 일수 (Config Diff MCP 전용) | X | `1` |
+| `MCP_MAX_RESPONSE_BYTES` | AI Agent 에게 돌려줄 응답의 최대 크기(UTF-8 바이트). 초과 시 응답을 자르지 않고 오류를 반환 (모든 서버 공통) | X | `30000` |
 
 > **수신자 이름 매핑**: `EMAIL_RECIPIENT_MAPPING` 환경변수에 이름과 이메일을 등록해두면, `receivers`에 이메일 대신 이름을 입력해도 서버가 이메일 주소로 자동 변환합니다. (예: `EMAIL_RECIPIENT_MAPPING=홍길동:hong@example.com`)
+
+> **응답 크기 제한 (`MCP_MAX_RESPONSE_BYTES`)**:
+> - 모든 MCP 서버는 AI Agent 에게 응답을 돌려주기 직전에 크기(UTF-8 바이트)를 검사합니다.
+> - 한도를 넘으면 **응답을 자르지 않고** "응답 데이터가 너무 커서 반환할 수 없습니다
+>   (응답 N바이트 > 허용 한도 M바이트)" 오류를 반환합니다. 잘린 데이터로 Agent 가 잘못
+>   판단하는 것을 막기 위함입니다.
+> - Agent 는 이 오류를 받으면 조회 범위(기간·대상·건수·파일)를 좁혀 재시도하거나, 사용자에게
+>   응답이 너무 크다는 사실을 알려야 합니다.
+> - 기본값은 `30000`(30KB)이며, 값이 1 미만이거나 정수가 아니면 서버 기동 시 오류가 납니다.
 
 ### Error RAG MCP (`error_rag_mcp`, 별도 환경변수)
 

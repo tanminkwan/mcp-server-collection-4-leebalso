@@ -38,6 +38,7 @@ from read_server_file_mcp.config import (
     UNC_PATH_PREFIX,
     WINDOWS_PATH_SEPARATORS,
 )
+from mcp_common.response_limit import limit_response_size
 
 SERVER_NAME = "read-server-file-mcp"
 SERVER_INSTRUCTIONS = (
@@ -168,6 +169,7 @@ def create_server() -> MCPServer:
     client = ReadServerFileClient(settings)
 
     @mcp.tool(description=REQUEST_TOOL_DESCRIPTION)
+    @limit_response_size(settings)
     async def request_read_server_file(host_id: str, file_path: str) -> str:
         """서버의 특정 위치 파일을 읽는 명령을 주문하고 command_id 를 반환한다."""
         try:
@@ -222,6 +224,7 @@ def create_server() -> MCPServer:
             return _request_error(CREATE_FAILED_MESSAGE_TEMPLATE.format(error=exc))
 
     @mcp.tool(description=RESULT_TOOL_DESCRIPTION)
+    @limit_response_size(settings)
     async def get_read_server_file_result(command_id: str) -> str:
         """command_id 로 파일 읽기 결과(파일 위치·파일 내용)를 조회한다."""
         identifier = (command_id or "").strip()

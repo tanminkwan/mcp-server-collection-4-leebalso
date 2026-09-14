@@ -9,6 +9,7 @@ from mcp.server.mcpserver import MCPServer
 
 from extract_error_log_mcp.client import ExtractLogClient
 from extract_error_log_mcp.config import Settings
+from mcp_common.response_limit import limit_response_size
 
 SERVER_NAME = "extract-error-log-mcp"
 SERVER_INSTRUCTIONS = "서버 에러(error) 로그 추출 요청 및 추출된 마크다운 결과를 조회하는 MCP 서버입니다. '서버 ooo에서 error를 찾아줘' 와 같은 요청에 사용하세요."
@@ -22,9 +23,11 @@ def create_client() -> ExtractLogClient:
 def create_server() -> MCPServer:
     """MCPServer 서버를 생성하고 로그 추출 관련 도구를 등록한다."""
     mcp = MCPServer(name=SERVER_NAME, instructions=SERVER_INSTRUCTIONS)
-    client = create_client()
+    settings = Settings()
+    client = ExtractLogClient(settings)
 
     @mcp.tool()
+    @limit_response_size(settings)
     async def request_extract_log(
         date: str,
         host_id: str,
@@ -71,6 +74,7 @@ def create_server() -> MCPServer:
             return f"로그 추출 요청 오류: {exc}"
 
     @mcp.tool()
+    @limit_response_size(settings)
     async def get_extracted_log(command_id: str) -> str:
         """지정된 command_id에 대한 mdcontent(추출된 로그 마크다운 문서)를 조회합니다.
         request_extract_log 호출 후 일정 시간(약 1분) 대기한 뒤에 이 도구를 호출해야 합니다.

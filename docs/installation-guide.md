@@ -223,6 +223,8 @@ API_SSL_VERIFY=false
 EMAIL_RECIPIENT_MAPPING=홍길동:hong@example.com, 김철수:kim@example.com
 # 선택: 설정 변경 이력 조회 시 단일 일자 앞뒤 확장 일수 (config-diff-mcp 전용)
 DIFF_DATE_PADDING_DAYS=1
+# 선택: 응답 최대 크기(UTF-8 바이트, 모든 서버 공통). 초과 시 오류 반환
+MCP_MAX_RESPONSE_BYTES=30000
 ```
 
 | 변수 | 설명 | 필수 | 기본값 |
@@ -233,6 +235,7 @@ DIFF_DATE_PADDING_DAYS=1
 | `API_TIMEOUT` | HTTP 요청 타임아웃(초) | X | `60` |
 | `EMAIL_RECIPIENT_MAPPING` | 수신자 이름-이메일 매핑 (`email-mcp` 전용) | X | — |
 | `DIFF_DATE_PADDING_DAYS` | 단일 일자 지정 시 앞뒤 확장 일수 (`config-diff-mcp` 전용) | X | `1` |
+| `MCP_MAX_RESPONSE_BYTES` | AI Agent 에게 돌려줄 응답의 최대 크기(UTF-8 바이트). 초과 시 응답을 자르지 않고 오류를 반환 (모든 서버 공통) | X | `30000` |
 
 > 위 표는 `email-mcp`/`extract-error-log-mcp`/`config-diff-mcp`가 공유하는 환경변수이다.
 > `error-rag-mcp`만 별도의 `RAG_*` 환경변수를 사용한다

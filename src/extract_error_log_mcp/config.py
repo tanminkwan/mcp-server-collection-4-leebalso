@@ -6,6 +6,8 @@ import os
 
 from dotenv import load_dotenv
 
+from mcp_common.config import load_max_response_bytes
+
 # API 엔드포인트 경로
 EXTRACT_LOG_PATH = "/api/v1/command_master/extract_log"
 MDCONTENT_LIST_PATH = "/api/v1/knowledge/mdcontent/list"
@@ -30,6 +32,8 @@ class Settings:
             os.getenv("API_SSL_VERIFY"), DEFAULT_SSL_VERIFY
         )
         self.api_timeout = int(os.getenv("API_TIMEOUT", str(DEFAULT_TIMEOUT)))
+        # AI Agent 에게 돌려줄 응답의 최대 크기 — 모든 MCP 서버가 공유하는 한도.
+        self.max_response_bytes = load_max_response_bytes()
 
     # -- derived properties --------------------------------------------------
 

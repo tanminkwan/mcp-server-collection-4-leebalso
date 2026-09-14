@@ -10,6 +10,7 @@ from config_diff_mcp.config import (
     WAS_RESOURCE,
     WEB_RESOURCE,
 )
+from mcp_common.config import DEFAULT_MAX_RESPONSE_BYTES, MAX_RESPONSE_BYTES_ENV
 
 
 @pytest.fixture(autouse=True)
@@ -138,3 +139,23 @@ class TestResourceSpec:
         """식별자 누락 메시지는 사용자에게 되묻도록 유도하는 문구를 포함한다."""
         assert "host_id" in WEB_RESOURCE.missing_filter_message
         assert "domain_id" in WAS_RESOURCE.missing_filter_message
+
+
+class TestResponseSizeLimitSetting:
+    """응답 크기 한도 설정 테스트."""
+
+    def test_defaults_to_30k(self, monkeypatch):
+        """MCP_MAX_RESPONSE_BYTES 미설정 시 기본값 30,000 바이트를 쓴다."""
+        monkeypatch.setenv("API_BASE_URL", "https://app.mwm.local:20443")
+        monkeypatch.setenv("API_BEARER_TOKEN", "secret-token")
+        monkeypatch.delenv(MAX_RESPONSE_BYTES_ENV, raising=False)
+
+        assert Settings().max_response_bytes == DEFAULT_MAX_RESPONSE_BYTES
+
+    def test_reads_limit_from_env(self, monkeypatch):
+        """환경변수로 응답 크기 한도를 조정할 수 있다."""
+        monkeypatch.setenv("API_BASE_URL", "https://app.mwm.local:20443")
+        monkeypatch.setenv("API_BEARER_TOKEN", "secret-token")
+        monkeypatch.setenv(MAX_RESPONSE_BYTES_ENV, "12345")
+
+        assert Settings().max_response_bytes == 12345

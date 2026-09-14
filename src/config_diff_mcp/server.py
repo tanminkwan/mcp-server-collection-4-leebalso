@@ -27,6 +27,7 @@ from config_diff_mcp.config import (
     WEB_CONFIG_FILE_NAME,
     WEB_RESOURCE,
 )
+from mcp_common.response_limit import limit_response_size
 
 SERVER_NAME = "config-diff-mcp"
 SERVER_INSTRUCTIONS = (
@@ -258,6 +259,7 @@ def create_server() -> MCPServer:
     diff_client = DiffClient(settings)
 
     @mcp.tool(description=WEB_TOOL_DESCRIPTION)
+    @limit_response_size(settings)
     async def get_diff_web(
         host_id: str, start_date: str = "", end_date: str = ""
     ) -> str:
@@ -272,6 +274,7 @@ def create_server() -> MCPServer:
         )
 
     @mcp.tool(description=WAS_TOOL_DESCRIPTION)
+    @limit_response_size(settings)
     async def get_diff_was(
         domain_id: str, start_date: str = "", end_date: str = ""
     ) -> str:

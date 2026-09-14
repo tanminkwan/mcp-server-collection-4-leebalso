@@ -13,6 +13,8 @@ from config_diff_mcp.config import (
     WEB_RESOURCE,
 )
 from config_diff_mcp.server import create_diff_client, create_server
+from mcp_common.config import MAX_RESPONSE_BYTES_ENV
+from mcp_common.response_limit import ResponseTooLargeError
 
 
 @pytest.fixture(autouse=True)
@@ -29,6 +31,7 @@ def _env(monkeypatch):
     monkeypatch.delenv("API_SSL_VERIFY", raising=False)
     monkeypatch.delenv("API_TIMEOUT", raising=False)
     monkeypatch.delenv("DIFF_DATE_PADDING_DAYS", raising=False)
+    monkeypatch.delenv(MAX_RESPONSE_BYTES_ENV, raising=False)
 
 
 @pytest.fixture()
@@ -458,3 +461,44 @@ class TestMain:
             server_module.main()
 
         create.return_value.run.assert_called_once_with(transport="stdio")
+
+
+class TestResponseSizeLimit:
+    """응답 크기 제한 테스트."""
+
+    @respx.mock
+    async def test_oversized_diff_raises_error(self, monkeypatch, _env):
+        """변경 이력 전문이 한도를 넘으면 '너무 크다'는 오류로 반환된다."""
+        monkeypatch.setenv(MAX_RESPONSE_BYTES_ENV, "200")
+        respx.get(WEB_LIST_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_list([{"id": 123, "host_id": "paaaa11", "create_on": "2026-08-11 14:23:01"}]),
+            )
+        )
+        respx.get("https://app.mwm.local:20443/diff_data/web/123").mock(
+            return_value=httpx.Response(200, json=_web_detail(new="설정" * 5000))
+        )
+
+        mcp = create_server()
+        with pytest.raises(ResponseTooLargeError) as exc_info:
+            await _fn(mcp, "get_diff_web")(host_id="paaaa11")
+        assert "너무 커서" in str(exc_info.value)
+
+    @respx.mock
+    async def test_diff_within_limit_passes_through(self, _env):
+        """기본 한도(30KB) 이내 응답은 그대로 반환된다."""
+        respx.get(WEB_LIST_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=_list([{"id": 123, "host_id": "paaaa11", "create_on": "2026-08-11 14:23:01"}]),
+            )
+        )
+        respx.get("https://app.mwm.local:20443/diff_data/web/123").mock(
+            return_value=httpx.Response(200, json=_web_detail())
+        )
+
+        mcp = create_server()
+        result = json.loads(await _fn(mcp, "get_diff_web")(host_id="paaaa11"))
+
+        assert result["found"] is True

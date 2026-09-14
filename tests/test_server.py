@@ -7,6 +7,8 @@ import pytest
 import respx
 
 from email_mcp.server import create_server, create_email_client
+from mcp_common.config import MAX_RESPONSE_BYTES_ENV
+from mcp_common.response_limit import ResponseTooLargeError
 
 
 @pytest.fixture(autouse=True)
@@ -21,6 +23,7 @@ def _env(monkeypatch):
     monkeypatch.setenv("API_BASE_URL", "https://api.test.local:20443")
     monkeypatch.setenv("API_BEARER_TOKEN", "test-token")
     monkeypatch.setenv("API_SSL_VERIFY", "false")
+    monkeypatch.delenv(MAX_RESPONSE_BYTES_ENV, raising=False)
 
 
 @pytest.fixture()
@@ -169,3 +172,36 @@ class TestSendMarkdownEmailTool:
         assert "이메일 발송 오류" in error_result
         assert "없는사람" in error_result
 
+
+
+class TestResponseSizeLimit:
+    """응답 크기 제한 테스트."""
+
+    @respx.mock
+    async def test_oversized_response_raises_error(self, monkeypatch, _env):
+        """한도를 넘는 응답은 잘리지 않고 '너무 크다'는 오류로 반환된다."""
+        monkeypatch.setenv(MAX_RESPONSE_BYTES_ENV, "50")
+        respx.post("https://api.test.local:20443/api/v1/email/send").mock(
+            return_value=httpx.Response(200, json={"message": "x" * 500})
+        )
+
+        tool_fn = create_server()._tool_manager._tools["send_html_email"].fn
+        with pytest.raises(ResponseTooLargeError) as exc_info:
+            await tool_fn(
+                receivers="user@example.com", subject="제목", content="<p>본문</p>"
+            )
+        assert "너무 커서" in str(exc_info.value)
+
+    @respx.mock
+    async def test_response_within_limit_passes_through(self, _env):
+        """기본 한도(30KB) 이내 응답은 그대로 반환된다."""
+        respx.post("https://api.test.local:20443/api/v1/email/send").mock(
+            return_value=httpx.Response(200, json={"message": "Email sent successfully"})
+        )
+
+        tool_fn = create_server()._tool_manager._tools["send_html_email"].fn
+        result = await tool_fn(
+            receivers="user@example.com", subject="제목", content="<p>본문</p>"
+        )
+
+        assert "Email sent successfully" in result

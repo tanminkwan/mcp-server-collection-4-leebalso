@@ -8,6 +8,7 @@ from mcp.server.mcpserver import MCPServer
 
 from email_mcp.client import EmailClient
 from email_mcp.config import Settings
+from mcp_common.response_limit import limit_response_size
 
 SERVER_NAME = "email-mcp"
 SERVER_INSTRUCTIONS = "EmailApi를 통해 HTML 및 Markdown 이메일을 발송하는 MCP 서버입니다. 수신자 지정 시 이메일 주소뿐만 아니라 사전에 등록된 이름(예: '홍길동')을 사용할 수 있습니다."
@@ -40,6 +41,7 @@ def create_server() -> MCPServer:
         return ",".join(resolved)
 
     @mcp.tool()
+    @limit_response_size(settings)
     async def send_html_email(
         receivers: str,
         subject: str,
@@ -67,6 +69,7 @@ def create_server() -> MCPServer:
             return f"이메일 발송 오류: {exc}"
 
     @mcp.tool()
+    @limit_response_size(settings)
     async def send_markdown_email(
         receivers: str,
         subject: str,

@@ -6,6 +6,8 @@ import os
 
 from dotenv import load_dotenv
 
+from mcp_common.config import load_max_response_bytes
+
 # API 엔드포인트 경로
 RAG_SEARCH_PATH = "/api/rag/search"
 RAG_KNOWLEDGE_PATH = "/api/rag/knowledge"
@@ -89,6 +91,8 @@ class Settings:
             os.getenv("RAG_TEXT_MATCHING_LIMIT", str(DEFAULT_TEXT_MATCHING_LIMIT))
         )
         self.source = os.getenv("RAG_SOURCE", DEFAULT_SOURCE)
+        # AI Agent 에게 돌려줄 응답의 최대 크기 — 모든 MCP 서버가 공유하는 한도.
+        self.max_response_bytes = load_max_response_bytes()
 
     # -- derived properties --------------------------------------------------
 

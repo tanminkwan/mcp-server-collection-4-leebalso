@@ -18,6 +18,8 @@ from read_server_file_mcp.config import (
     RESULT_PENDING_MESSAGE_TEMPLATE,
 )
 from read_server_file_mcp.server import create_read_server_file_client, create_server
+from mcp_common.config import MAX_RESPONSE_BYTES_ENV
+from mcp_common.response_limit import ResponseTooLargeError
 
 
 @pytest.fixture(autouse=True)
@@ -34,6 +36,7 @@ def _env(monkeypatch):
     monkeypatch.delenv("API_SSL_VERIFY", raising=False)
     monkeypatch.delenv("API_TIMEOUT", raising=False)
     monkeypatch.delenv("READ_SERVER_FILE_RESULT_WAIT_SECONDS", raising=False)
+    monkeypatch.delenv(MAX_RESPONSE_BYTES_ENV, raising=False)
 
 
 @pytest.fixture()
@@ -545,3 +548,49 @@ class TestMain:
             server_module.main()
 
         create.return_value.run.assert_called_once_with(transport="stdio")
+
+
+class TestResponseSizeLimit:
+    """응답 크기 제한 테스트."""
+
+    @respx.mock
+    async def test_oversized_file_content_raises_error(self, monkeypatch, _env):
+        """파일 내용이 한도를 넘으면 잘리지 않고 '너무 크다'는 오류로 반환된다."""
+        monkeypatch.setenv(MAX_RESPONSE_BYTES_ENV, "500")
+        respx.get(RESULT_URL).mock(
+            return_value=httpx.Response(
+                200, json=_result_payload(result_text="로그 한 줄\n" * 2000)
+            )
+        )
+
+        mcp = create_server()
+        with pytest.raises(ResponseTooLargeError) as exc_info:
+            await _fn(mcp, "get_read_server_file_result")(command_id="cmd-1")
+        assert "너무 커서" in str(exc_info.value)
+
+    @respx.mock
+    async def test_result_within_limit_passes_through(self, _env):
+        """기본 한도(30KB) 이내 응답은 그대로 반환된다."""
+        respx.get(RESULT_URL).mock(
+            return_value=httpx.Response(200, json=_result_payload())
+        )
+
+        mcp = create_server()
+        result = json.loads(
+            await _fn(mcp, "get_read_server_file_result")(command_id="cmd-1")
+        )
+
+        assert result["found"] is True
+
+    @respx.mock
+    async def test_request_tool_is_also_guarded(self, monkeypatch, _env):
+        """주문 도구의 응답에도 동일한 한도가 적용된다."""
+        monkeypatch.setenv(MAX_RESPONSE_BYTES_ENV, "10")
+        _mock_agent_lookup("agent-1")
+        _mock_create()
+
+        mcp = create_server()
+        with pytest.raises(ResponseTooLargeError):
+            await _fn(mcp, "request_read_server_file")(
+                host_id="pcbkaa11", file_path="/var/log/messages"
+            )

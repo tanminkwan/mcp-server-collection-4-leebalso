@@ -7,6 +7,8 @@ import os
 
 from dotenv import load_dotenv
 
+from mcp_common.config import load_max_response_bytes
+
 # API 엔드포인트 경로
 EMAIL_SEND_PATH = "/api/v1/email/send"
 EMAIL_SEND_MARKDOWN_PATH = "/api/v1/email/send_markdown"
@@ -36,6 +38,8 @@ class Settings:
         self.recipient_mapping: dict[str, str] = self._parse_mapping(
             os.getenv("EMAIL_RECIPIENT_MAPPING", "")
         )
+        # AI Agent 에게 돌려줄 응답의 최대 크기 — 모든 MCP 서버가 공유하는 한도.
+        self.max_response_bytes = load_max_response_bytes()
 
     # -- derived properties --------------------------------------------------
 

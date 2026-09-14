@@ -18,6 +18,7 @@ from error_rag_mcp.config import (
     TEXT_MATCHING_SEARCH_METHOD,
     VECTOR_SEARCH_METHOD,
 )
+from mcp_common.response_limit import limit_response_size
 
 SERVER_NAME = "error-rag-mcp"
 SERVER_INSTRUCTIONS = (
@@ -90,6 +91,7 @@ def create_server() -> MCPServer:
     rag_client = RagClient(settings)
 
     @mcp.tool()
+    @limit_response_size(settings)
     async def search_similar_error(error_summary: str, error_keyword: str) -> str:
         """과거 동일/유사 오류 사례와 조치 방법을 RAG 서비스에서 검색합니다. 조치를 시작하기 전에
         먼저 호출해서 이미 알려진 해결 방법이 있는지 확인하세요. 오류 요약으로 벡터(의미) 검색을,
@@ -123,6 +125,7 @@ def create_server() -> MCPServer:
             return f"오류 검색 오류: {exc}"
 
     @mcp.tool()
+    @limit_response_size(settings)
     async def register_error_resolution(
         error_summary: str,
         error_keyword: list[str],

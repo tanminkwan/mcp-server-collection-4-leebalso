@@ -104,6 +104,10 @@ DIFF_DATE_PADDING_DAYS=1
 # read-server-file-mcp 전용 설정 (접속 정보는 위 API_* 를 공유)
 # 선택: 파일 읽기 주문 후 결과 조회까지 권장 대기 시간(초, 기본 30)
 READ_SERVER_FILE_RESULT_WAIT_SECONDS=30
+
+# 모든 서버 공통
+# 선택: 응답 최대 크기(UTF-8 바이트, 기본 30000). 초과 시 오류 반환
+MCP_MAX_RESPONSE_BYTES=30000
 ```
 
 *참고: `EMAIL_RECIPIENT_MAPPING`을 설정하면 이메일 주소 대신 `홍길동` 같은 수신자 이름만 전달해도 자동으로 이메일 주소로 변환하여 발송합니다.*

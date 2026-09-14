@@ -2,8 +2,9 @@
 
 ## 개요
 
-이 저장소는 **stdio 전송 방식**의 독립적인 MCP(Model Context Protocol) 서버 4개로 구성된
-컬렉션이다. 각 서버는 서로 의존하지 않으며, 모두 `config.py`(환경변수 기반 설정) →
+이 저장소는 **stdio 전송 방식**의 독립적인 MCP(Model Context Protocol) 서버 5개로 구성된
+컬렉션이다. 각 서버는 서로 의존하지 않으며(공통 모듈 `mcp_common` 만 공유한다), 모두
+`config.py`(환경변수 기반 설정) →
 `client.py`(HTTP 클라이언트) → `server.py`(MCP 도구 등록 및 엔트리포인트) 3계층 구조를
 공유한다.
 
@@ -13,6 +14,8 @@
 | Extract Error Log MCP | `extract_error_log_mcp` | 서버 에러 로그 추출 요청 및 결과(마크다운) 조회 |
 | Error RAG MCP | `error_rag_mcp` | llm-agent RAG API로 오류/조치 사례 검색·등록 |
 | Config Diff MCP | `config_diff_mcp` | 리발소 MwDiffDataApi로 WAS(`domain.xml`)/WEB(`http.m`) 설정 변경 이력 조회 |
+| Read Server File MCP | `read_server_file_mcp` | 대상 호스트의 절대 경로 파일 내용 읽기 (명령 주문 → 결과 조회 2단계) |
+| (공통 모듈) | `mcp_common` | 모든 서버가 공유하는 응답 크기 제한 가드 |
 
 공통 의존성 흐름:
 
@@ -24,6 +27,69 @@ server.py → client.py → config.py
 - `server.py`는 `client.py`에 의존 (API 호출 위임)
 - `client.py`는 `config.py`에 의존 (설정값 주입)
 - 의존성 역전: 각 `*Client`는 구체적인 환경변수 접근 없이 `Settings` 객체를 주입받음
+
+---
+
+## 0. 공통 모듈 (`mcp_common`)
+
+### 모듈 구조
+
+```
+src/mcp_common/
+├── __init__.py          # 공개 API 재노출
+├── config.py            # 응답 크기 제한 상수 및 환경변수 로더
+└── response_limit.py    # 응답 크기 가드 (예외 · 데코레이터)
+```
+
+### 배경
+
+MCP 서버가 AI Agent 에게 돌려주는 응답(로그 파일 전문, 설정 파일 diff, RAG 검색 결과 등)은
+입력에 따라 수 MB까지 커질 수 있다. 이런 응답은 Agent 의 컨텍스트를 잠식하거나 호출 자체를
+실패시킨다. 응답을 잘라서 돌려주면 Agent 는 잘렸다는 사실을 모른 채 불완전한 데이터로 판단하게
+되므로, **자르지 않고 명시적으로 오류를 발생시킨다.**
+
+### 모듈 설명
+
+#### config.py — 설정 관리
+- `MAX_RESPONSE_BYTES_ENV = "MCP_MAX_RESPONSE_BYTES"`: 한도를 지정하는 환경변수 이름
+- `DEFAULT_MAX_RESPONSE_BYTES = 30_000`: 미설정 시 기본 한도 (UTF-8 바이트)
+- `RESPONSE_TOO_LARGE_MESSAGE_TEMPLATE`: 한도 초과 시 Agent 에게 전달할 안내 문구
+  (실제 크기·한도·재시도 방법·조정용 환경변수명을 포함한다)
+- `load_max_response_bytes()`: 환경변수를 읽어 양의 정수로 검증한다. 잘못된 값이면 서버
+  기동 시점에 `ValueError` 로 즉시 실패시켜, 한도 없는 상태로 운영되는 일을 막는다.
+
+#### response_limit.py — 응답 크기 가드
+- `ResponseSizeLimited` (Protocol): `max_response_bytes: int` 를 제공하는 설정 객체의 계약.
+  각 서버의 `Settings` 가 구조적으로 이를 만족하므로 가드는 특정 서버에 의존하지 않는다.
+- `ResponseTooLargeError(ToolError)`: 한도 초과 오류. MCP 는 `ToolError` 의 메시지만
+  호출자에게 그대로 전달하므로(그 외 예외는 일반 문구로 가려진다) `ToolError` 를 상속한다.
+- `measure_response_bytes(response)`: UTF-8 바이트 수로 크기를 잰다 (한글은 문자 수 ≠ 바이트 수).
+- `enforce_response_size(response, limit)`: 한도 이내면 그대로 반환, 초과면 예외 발생.
+- `limit_response_size(limit)`: 비동기 MCP 도구를 감싸는 데코레이터.
+
+### 적용 방식
+
+각 서버의 `create_server()` 에서 도구 등록 시 `@mcp.tool()` 안쪽에 데코레이터를 둔다.
+
+```python
+@mcp.tool(description=...)
+@limit_response_size(settings)
+async def get_read_server_file_result(command_id: str) -> str:
+    ...
+```
+
+도구 본문 **바깥**에서 감싸므로, 도구가 자체 `try/except` 로 API 오류를 정상 응답 문자열로
+변환하더라도 크기 검사는 그 이후에 수행된다. `functools.wraps` 로 시그니처·docstring 을
+보존하므로 MCP 도구 스키마와 설명은 그대로 유지된다.
+
+### 설계 근거 (SOLID)
+
+- **SRP**: 크기 측정·판정은 `mcp_common` 이 전담하고, 각 도구는 응답 조립에만 집중한다.
+- **OCP**: 새 서버·새 도구는 데코레이터 한 줄만 추가하면 되고 가드 코드는 수정하지 않는다.
+- **ISP/DIP**: 가드는 `Settings` 전체가 아니라 `max_response_bytes` 만 요구하는 좁은
+  프로토콜에 의존한다.
+- **하드코딩 금지**: 기본 한도·환경변수명·인코딩·안내 문구를 모두 `mcp_common/config.py`
+  상수로 관리한다.
 
 ---
 

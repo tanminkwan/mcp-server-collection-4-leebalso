@@ -65,11 +65,21 @@ read-server-file-mcp
 | `EMAIL_RECIPIENT_MAPPING` | 수신자 이름-이메일 매핑 (JSON 또는 `이름:이메일` 콤마 구분, Email MCP 전용) | X | — |
 | `DIFF_DATE_PADDING_DAYS` | 단일 일자 지정 시 앞뒤로 확장할 일수 (Config Diff MCP 전용) | X | `1` |
 | `READ_SERVER_FILE_RESULT_WAIT_SECONDS` | 파일 읽기 주문 후 결과 조회까지 권장 대기 시간(초) (Read Server File MCP 전용) | X | `30` |
+| `MCP_MAX_RESPONSE_BYTES` | AI Agent 에게 돌려줄 응답의 최대 크기(UTF-8 바이트). 초과 시 응답을 자르지 않고 오류를 반환 (모든 서버 공통) | X | `30000` |
 
 > **수신자 이름 매핑 (`EMAIL_RECIPIENT_MAPPING`)**:
 > - `EMAIL_RECIPIENT_MAPPING` 환경변수에 이름과 이메일 주소를 등록하면, 이메일 발송 시 `receivers`에 이메일 주소 대신 이름만 지정해도 서버가 자동으로 이메일 주소로 변환합니다.
 > - **콤마 구분 형식**: `홍길동:hong@example.com, 김철수:kim@example.com`
 > - **JSON 형식**: `{"홍길동": "hong@example.com", "김철수": "kim@example.com"}`
+
+> **응답 크기 제한 (`MCP_MAX_RESPONSE_BYTES`)**:
+> - 모든 MCP 서버는 AI Agent 에게 응답을 돌려주기 직전에 크기(UTF-8 바이트)를 검사합니다.
+> - 한도를 넘으면 **응답을 자르지 않고** "응답 데이터가 너무 커서 반환할 수 없습니다
+>   (응답 N바이트 > 허용 한도 M바이트)" 오류를 반환합니다. 잘린 데이터로 Agent 가 잘못
+>   판단하는 것을 막기 위함입니다.
+> - Agent 는 이 오류를 받으면 조회 범위(기간·대상·건수·파일)를 좁혀 재시도하거나, 사용자에게
+>   응답이 너무 크다는 사실을 알려야 합니다.
+> - 기본값은 `30000`(30KB)이며, 값이 1 미만이거나 정수가 아니면 서버 기동 시 오류가 납니다.
 
 ### Error RAG MCP (`error_rag_mcp`)
 
@@ -386,10 +396,13 @@ src/
 │   ├── config.py     ← Settings, ResourceSpec(WAS/WEB), 경로·형식·메시지 상수
 │   ├── client.py     ← 변경 이력 API 클라이언트 (DiffClient)
 │   └── server.py     ← get_diff_was / get_diff_web 등록
-└── read_server_file_mcp/
-    ├── config.py     ← Settings, 명령 타입·조회 조건·오류 문구·메시지 상수
-    ├── client.py     ← 에이전트 조회/명령 생성/결과 조회 클라이언트 (ReadServerFileClient)
-    └── server.py     ← request_read_server_file / get_read_server_file_result 등록
+├── read_server_file_mcp/
+│   ├── config.py     ← Settings, 명령 타입·조회 조건·오류 문구·메시지 상수
+│   ├── client.py     ← 에이전트 조회/명령 생성/결과 조회 클라이언트 (ReadServerFileClient)
+│   └── server.py     ← request_read_server_file / get_read_server_file_result 등록
+└── mcp_common/
+    ├── config.py         ← 응답 크기 제한 상수 및 환경변수 로더
+    └── response_limit.py ← 모든 도구가 공유하는 응답 크기 가드
 ```
 
 ## 테스트

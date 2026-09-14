@@ -8,6 +8,8 @@ import pytest
 import respx
 
 from error_rag_mcp.server import create_server, create_rag_client
+from mcp_common.config import MAX_RESPONSE_BYTES_ENV
+from mcp_common.response_limit import ResponseTooLargeError
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +25,7 @@ def _env(monkeypatch):
     monkeypatch.setenv("RAG_COLLECTION_NAME", "error_rag_test")
     monkeypatch.setenv("RAG_DOMAIN_ID", "6")
     monkeypatch.delenv("RAG_API_BEARER_TOKEN", raising=False)
+    monkeypatch.delenv(MAX_RESPONSE_BYTES_ENV, raising=False)
 
 
 @pytest.fixture()
@@ -291,3 +294,31 @@ class TestRegisterErrorResolutionTool:
         )
 
         assert "오류 조치 결과 등록 오류" in result
+
+
+class TestResponseSizeLimit:
+    """응답 크기 제한 테스트."""
+
+    @respx.mock
+    async def test_oversized_search_result_raises_error(self, monkeypatch, _env):
+        """검색 결과가 한도를 넘으면 잘리지 않고 '너무 크다'는 오류로 반환된다."""
+        monkeypatch.setenv(MAX_RESPONSE_BYTES_ENV, "100")
+        huge = [
+            {"id": "a", "collection": "c", "score": 0.9, "content": "x" * 5000,
+             "extended_content": "y" * 5000, "domain_id": 6, "source": "s",
+             "created_at": "2026-01-01T00:00:00+00:00"},
+        ]
+        respx.post(SEARCH_URL).mock(side_effect=_search_side_effect(huge, []))
+
+        tool_fn = create_server()._tool_manager._tools["search_similar_error"].fn
+        with pytest.raises(ResponseTooLargeError) as exc_info:
+            await tool_fn(error_summary="요약", error_keyword="")
+        assert "너무 커서" in str(exc_info.value)
+
+    @respx.mock
+    async def test_result_within_limit_passes_through(self, _env):
+        """기본 한도(30KB) 이내 응답은 그대로 반환된다."""
+        respx.post(SEARCH_URL).mock(side_effect=_search_side_effect([], []))
+
+        tool_fn = create_server()._tool_manager._tools["search_similar_error"].fn
+        assert json.loads(await tool_fn(error_summary="요약", error_keyword="")) == []

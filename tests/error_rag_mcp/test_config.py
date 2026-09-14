@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from error_rag_mcp.config import Settings
+from mcp_common.config import DEFAULT_MAX_RESPONSE_BYTES, MAX_RESPONSE_BYTES_ENV
 
 
 @pytest.fixture(autouse=True)
@@ -137,3 +138,25 @@ class TestSettings:
         settings = Settings()
 
         assert settings.knowledge_url == "http://localhost:28000/api/rag/knowledge"
+
+
+class TestResponseSizeLimitSetting:
+    """응답 크기 한도 설정 테스트."""
+
+    def test_defaults_to_30k(self, monkeypatch):
+        """MCP_MAX_RESPONSE_BYTES 미설정 시 기본값 30,000 바이트를 쓴다."""
+        monkeypatch.setenv("RAG_API_BASE_URL", "http://localhost:28000")
+        monkeypatch.setenv("RAG_COLLECTION_NAME", "c")
+        monkeypatch.setenv("RAG_DOMAIN_ID", "6")
+        monkeypatch.delenv(MAX_RESPONSE_BYTES_ENV, raising=False)
+
+        assert Settings().max_response_bytes == DEFAULT_MAX_RESPONSE_BYTES
+
+    def test_reads_limit_from_env(self, monkeypatch):
+        """환경변수로 응답 크기 한도를 조정할 수 있다."""
+        monkeypatch.setenv("RAG_API_BASE_URL", "http://localhost:28000")
+        monkeypatch.setenv("RAG_COLLECTION_NAME", "c")
+        monkeypatch.setenv("RAG_DOMAIN_ID", "6")
+        monkeypatch.setenv(MAX_RESPONSE_BYTES_ENV, "12345")
+
+        assert Settings().max_response_bytes == 12345

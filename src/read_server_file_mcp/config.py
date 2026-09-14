@@ -7,6 +7,8 @@ import os
 
 from dotenv import load_dotenv
 
+from mcp_common.config import load_max_response_bytes
+
 # API 엔드포인트 경로
 COMMAND_CREATE_PATH = "/api/v1/command_master/create"
 COMMAND_RESULT_PATH = "/api/v1/command_master/result"
@@ -163,6 +165,8 @@ class Settings:
                 "READ_SERVER_FILE_RESULT_WAIT_SECONDS", str(DEFAULT_RESULT_WAIT_SECONDS)
             )
         )
+        # AI Agent 에게 돌려줄 응답의 최대 크기 — 모든 MCP 서버가 공유하는 한도.
+        self.max_response_bytes = load_max_response_bytes()
 
     # -- derived properties --------------------------------------------------
 
